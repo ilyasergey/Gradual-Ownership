@@ -1,0 +1,30 @@
+AST.CompilationUnit []
+  AST.List
+  AST.List
+    AST.ClassDecl [A]
+      AST.Modifiers
+        AST.List
+      AST.Opt
+      AST.List
+      AST.List
+        AST.FieldDeclaration [a]
+          AST.Modifiers
+            AST.List
+              AST.Modifier [final]
+          AST.TypeAccess [, A]
+          AST.Opt
+            AST.ClassInstanceExpr
+              AST.TypeAccess [, A]
+              AST.List
+              AST.Opt
+        AST.ConstructorDecl
+          AST.Modifiers
+            AST.List
+          AST.List
+          AST.List
+          AST.Opt
+            AST.ExprStmt
+              AST.SuperConstructorAccess
+                AST.List
+          AST.Block
+            AST.List

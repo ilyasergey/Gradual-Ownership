@@ -1,0 +1,31 @@
+AST.CompilationUnit []
+  AST.List
+  AST.List
+    AST.ClassDecl [D]
+      AST.Modifiers
+        AST.List
+      AST.Opt
+      AST.List
+      AST.List
+        AST.FieldDeclaration [d]
+          AST.Modifiers
+            AST.List
+          AST.OwnTypeAccess [, D]
+            AST.TypeAccess [, D]
+            AST.List
+              AST.ConcreteOwner [owner1]
+                AST.Opt
+              AST.ConcreteOwner [owner2]
+                AST.Opt
+          AST.Opt
+        AST.ConstructorDecl
+          AST.Modifiers
+            AST.List
+          AST.List
+          AST.List
+          AST.Opt
+            AST.ExprStmt
+              AST.SuperConstructorAccess
+                AST.List
+          AST.Block
+            AST.List

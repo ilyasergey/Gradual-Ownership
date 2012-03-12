@@ -1,0 +1,1 @@
+3:39:super type's owner argument should be concrete

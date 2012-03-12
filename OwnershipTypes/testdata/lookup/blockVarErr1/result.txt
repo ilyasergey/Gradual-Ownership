@@ -1,0 +1,4 @@
+6:9:Primary owner 'var' is not provably inside in the scope of 'owner'
+6:9:local variable 'var' should be declared final to be used as an owner argument
+6:35:Primary owner 'var' is not provably inside in the scope of 'owner'
+6:35:local variable 'var' should be declared final to be used as an owner argument

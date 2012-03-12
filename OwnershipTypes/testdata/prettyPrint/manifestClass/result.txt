@@ -1,0 +1,11 @@
+class D/*<, owner>*/ {
+  D() {
+    super();
+  }
+}
+
+class E/*<>*/ extends D/*<owner, >*/ {
+  E() {
+    super();
+  }
+}

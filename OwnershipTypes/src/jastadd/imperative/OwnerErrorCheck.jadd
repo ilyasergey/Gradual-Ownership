@@ -1,0 +1,214 @@
+import java.util.ArrayList;
+/**
+Ownership parameters-specific checks
+*/
+aspect OwnerErrorCheck {
+  refine ErrorCheck public void ASTNode.collectErrors() {
+    ownersSpecificChecks();
+    typeCheckWithOwners();
+    // reuse previous implementation
+    ErrorCheck.ASTNode.collectErrors();
+  }
+
+  public void ASTNode.ownersSpecificChecks() {}
+
+  public void OwnerVariable.ownersSpecificChecks() {
+    // Ambiguous parameter definition
+    if (lookupOwnerVariable(name()).size() > 1) {
+      myError("Owner parameter " + name() + " is defined more than once");
+    }
+    // todo: wrong owner of the super-class
+  }
+
+  // Check ownership-parametrized class declarations
+  public void ClassDecl.ownersSpecificChecks() {
+    if (!isParametrized()) {
+      return; // no owner parameters => no checks
+    }
+    ArrayList<Access> supers = new ArrayList<Access>();
+    if (hasSuperClassAccess()) {
+      Access superClass = getSuperClassAccess();
+      supers.add(superClass);
+    }
+    for (Access imp : getImplementsList()) {
+      supers.add(imp);
+    }
+    checkSupers(supers, getOwnerParameter(0));
+  }
+
+  // Check ownership-parametrized interface declarations
+  public void InterfaceDecl.ownersSpecificChecks() {
+    if (!isParametrized()) {
+      return; // no owner parameters => no checks
+    }
+    checkSupers(getSuperInterfaceIdList(), getOwnerParameter(0));
+  }
+
+  /**
+  * Check super-types of a parametrized class or an interface
+  */
+  public void TypeDecl.checkSupers(Iterable<Access> supers, OwnerDeclaration principal) {
+    // Check a super class and all implemented interfaces
+    for (Access access : supers) {
+      if (access instanceof OwnTypeAccess) {
+        OwnTypeAccess parent = (OwnTypeAccess) access;
+        if (parent.getNumOwnerArgument() == 0) {
+          parent.myError("super type should take ownership parameters");
+          return;
+        }
+        // All parent owners should be concrete
+        for (Owner o : parent.getOwnerArguments()) {
+          if (!o.decl().isConcreteOwner()) {
+            o.myError("super type's owner argument should be concrete");
+          }
+        }
+        // Subclassing should preserve owners
+        Owner first = parent.getOwnerArgument(0);
+        if (first.decl().isConcreteOwner() && ((ConcreteOwner)first).decl() != principal) {
+          first.myError("super type should have the same principal owner " + principal.name());
+        }
+      } else {
+        final TypeDecl original = access.type().original();
+        if (original.getNumOwnerParameter() != 1) { // Implicit substitution ==> it's ok
+          access.myError("super type should take ownership parameters");
+        }
+      }
+    }
+  }
+
+  public void OwnerTypeDecl.ownersSpecificChecks() {
+    super.ownersSpecificChecks();
+    java.util.Collection<TypeDecl> supers = supers();
+    ArrayList<String> errors = new ArrayList<String>();
+    // check for non-consistent duplicates in base types
+    boolean flag = false;
+    for (TypeDecl sample : supers) {
+      for (TypeDecl other: supers) {
+        if (sample.original() == other.original() &&
+            !sample.consistent(other)) {
+          myError("The base type " + sample.toString() + " is not consistent with another base type " +
+                 other.toString() + " of " + fullName());
+          flag = true;
+        }
+      }
+      if (flag) break;
+    }
+  }
+
+  public void OwnershipType.ownersSpecificChecks() { /* do nothing */ }
+
+  /**
+  * Check that ownership type annotations are well-formed
+  */
+  public void OwnTypeAccess.ownersSpecificChecks() {
+    TypeDecl resolved = getTypeAccess().type();
+    if (resolved.getNumOwnerParameter() != getNumOwnerArgument()) {
+      getTypeAccess().error("Wrong number of ownership arguments for the type " + resolved.name());
+    }
+    if (getNumOwnerArgument() == 0) {
+      return;
+    }
+    Owner primary = getOwnerArgument(0);
+    for (Owner o : getOwnerArguments()) {
+      if (!primary.subcon(o)) {
+        primary.myError("Primary owner '" + primary.toString() + "' is not provably inside in the scope of '" + o.toString() + "'");
+      }
+      OwnerDeclaration decl = o.decl();
+      if (!decl.isValidAt(o)) {
+        String msg = "An owner '" + o.toString() + "' is not valid in the context of " + this.toString();
+        if (o.inStaticMethod()) {
+          o.myError(msg);
+        } else {
+          o.warning(msg);
+        }
+      }
+    }
+  }
+
+/////////////////////////////////////////
+////////////// Expressions //////////////
+/////////////////////////////////////////
+
+  public void Expr.ownersSpecificChecks() {
+    if (this instanceof TypeAccess) return;
+    if (this instanceof Owner) return;
+    TypeDecl own = type();
+    TypeDecl expected = expectedOwnType();
+    if (!own.conformsTo(expected)) {
+      warning("The type " + own.fullName() + " of the expression " + this.toString() + " does not statically conform to its expected type " + expected.fullName());
+    }
+  }
+
+  syn boolean AssignExpr.notSpecified() {
+    Variable v = destAsVar();
+    if (v == null || !(v instanceof FieldDeclaration)) return false;
+    Expr dest = getDest();
+    TypeDecl type = dest.unfill(dest.type());
+    return !type.specified();
+  }
+
+  syn Variable AssignExpr.destAsVar() {
+    Expr dest = getDest();
+    if (dest instanceof VarAccess) {
+      VarAccess access = (VarAccess) dest;
+      return access.decl();
+    }
+    if (dest instanceof AbstractDot) {
+      AbstractDot dot = (AbstractDot) dest;
+      final Access last = dot.lastAccess();
+      if (last instanceof VarAccess) {
+        VarAccess access = (VarAccess) last;
+        return access.decl();
+      }
+    }
+    return null;
+  }
+
+  public void AssignSimpleExpr.ownersSpecificChecks() {
+    if (notSpecified()) {
+      Expr dest = getDest();
+      TypeDecl type = dest.unfill(dest.type());
+      warning("The static type " + type + " of the destination expression " + dest.toString() + " does not specify the primary owner");
+    }
+  }
+
+  public void ClassInstanceExpr.ownersSpecificChecks() {
+    final Access access = getAccess();
+    if (access instanceof TypeAccess && !(access instanceof OwnTypeAccess)) {
+      TypeDecl td = access.type();
+      if (!(td instanceof InterfaceDecl) && td.isParametrized()) {
+        access.myError("class constructor " + td.name() + " should take ownership arguments");
+        return;
+      }
+    }
+    if (access instanceof OwnTypeAccess) {
+      OwnTypeAccess ownAccess = (OwnTypeAccess) access;
+      for (Owner o : ownAccess.getOwnerArguments()) {
+        if (!o.decl().isConcreteOwner()) {
+          o.myError("owner arguments of a class constructor should be concrete");
+        }
+      }
+    }
+    super.ownersSpecificChecks();
+  }
+
+  public void ASTNode.myError(String s) {
+      ASTNode node = this;
+      while(node != null && !(node instanceof CompilationUnit))
+        node = node.getParent();
+      CompilationUnit cu = (CompilationUnit)node;
+      if(getStart() != 0 && getEnd() != 0) {
+        int line = getLine(getStart());
+        int column = getColumn(getStart());
+        int endLine = getLine(getEnd());
+        int endColumn = getColumn(getEnd());
+        cu.errors.add(new Problem(sourceFile(), s, line, column, endLine, endColumn, Problem.Severity.ERROR, Problem.Kind.SEMANTIC));
+      }
+      else
+        cu.errors.add(new Problem(sourceFile(), s, lineNumber(), Problem.Severity.ERROR, Problem.Kind.SEMANTIC));
+    }
+
+
+
+
+}

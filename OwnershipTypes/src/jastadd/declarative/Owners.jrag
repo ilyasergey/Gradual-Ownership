@@ -1,0 +1,135 @@
+import helpers.*;
+import java.util.*;
+
+aspect Owners {
+
+  interface OwnerDeclaration {
+    public String name();
+    public boolean isWorld();
+    public boolean isThisOwner();
+    public boolean isUnknownOwner();
+    public boolean isDependentOwner();
+    public boolean isConcreteOwner();
+    public boolean isBadOwner();
+    public String asObject();
+  }
+
+  syn String World.asObject() = "\"WorldOwner\"";
+  syn String UnknownOwner.asObject() = "\"UnknownOwner\"";
+  syn String ThisOwner.asObject() = name();
+  syn String DependentOwner.asObject() = "_depMap.get(\"" + toString().replace(".", "_") + "\")";
+  syn String FixedThis.asObject() = "_depMap.get(\"" + toString().replace(".", "_") + "\")";
+  syn String OwnerVariable.asObject() = getEnclosingTypeDecl().fullName() + ".this." + name();
+  syn String Variable.asObject() = name();
+  syn String BadOwnerVariable.asObject() = name();
+
+  // World, This, unknown and dependent owners are declarations for themselves
+  OwnerVariable implements OwnerDeclaration;
+  ParameterDeclaration implements OwnerDeclaration;
+  VariableDeclaration implements OwnerDeclaration;
+  FieldDeclaration implements OwnerDeclaration;
+  World implements OwnerDeclaration;
+  ThisOwner implements OwnerDeclaration;
+  UnknownOwner implements OwnerDeclaration;
+  DependentOwner implements OwnerDeclaration;
+  FixedThis implements OwnerDeclaration;
+
+  syn boolean DependentOwner.equals(Object other) =
+    other instanceof DependentOwner &&
+    getNode().equals(((DependentOwner)other).getNode());
+
+  syn int DependentOwner.hashCode() = getNode().hashCode() + 31;
+
+
+  syn String OwnerVariable.name() = getID();
+  syn String ConcreteOwner.name() = getID();
+  syn String DependentOwner.name() = getID();
+  syn String FixedThis.name() = "fixedThis";
+
+  syn String World.name() = "world";
+  syn lazy String ThisOwner.name() = hostType().fullName() + ".this";
+  syn String UnknownOwner.name() = "?";
+
+  syn lazy World Program.world() = new World();
+  eq Program.getChild().world() = world();
+  inh World ASTNode.world();
+
+  syn lazy String OwnTypeAccess.getPackage() {
+    final Access access = getTypeAccess();
+    if (access instanceof TypeAccess) {
+      final TypeAccess typeAccess = (TypeAccess) access;
+      return typeAccess.getPackage();
+    }
+    return access.type().packageName();
+  }
+  syn lazy String OwnTypeAccess.getID() = getTypeAccess().type().name();
+
+  interface ParametrizedTypeDecl {
+    int getNumOwnerParameter();
+    OwnerVariable getOwnerParameter(int index);
+    List getOwnerParameterList();
+    syn lazy boolean isParametrized();
+    syn lazy Substitution getSubstitution();
+  }
+
+  // Any type is parametrized by default
+  TypeDecl implements ParametrizedTypeDecl;
+
+  // Default implementation for every TypeDecl
+  eq TypeDecl.getSubstitution() = Substitution.empty();
+  eq TypeDecl.isParametrized() = getNumOwnerParameter() > 0;
+  syn lazy int TypeDecl.getNumOwnerParameter() = 0;
+  syn lazy OwnerVariable TypeDecl.getOwnerParameter(int index) = null;
+  syn lazy List TypeDecl.getOwnerParameterList() = new List<OwnerVariable>();
+
+  eq OwnerClassDecl.getSubstitution() {
+    Substitution subst = OwnershipUtil.fromParameterList(getOwnerParameterList());
+    if (getNumOwnerParameter() == 0) {
+      for (TypeDecl td : supers()) {
+       if (td instanceof OwnershipType) {
+         java.util.ArrayList<OwnerDeclaration> args= ((OwnershipType)td).argsAsList();
+         for (OwnerDeclaration od: args) {
+           if (!od.isWorld()) {
+             subst = subst.update(od.name(), od);
+           }
+         }
+       }
+      }
+    }
+    return subst;
+  }
+  eq OwnerInterfaceDecl.getSubstitution() {
+    Substitution subst = OwnershipUtil.fromParameterList(getOwnerParameterList());
+    if (getNumOwnerParameter() == 0) {
+      for (TypeDecl td : supers()) {
+       if (td instanceof OwnershipType) {
+         java.util.ArrayList<OwnerDeclaration> args= ((OwnershipType)td).argsAsList();
+         for (OwnerDeclaration od: args) {
+           if (!od.isWorld()) {
+             subst = subst.update(od.name(), od);
+           }
+         }
+       }
+      }
+    }
+    return subst;
+  }
+
+}
+
+// Ordering of owners
+aspect OwnerComparison {
+    syn lazy boolean Owner.subcon(Owner other) = decl().subcon(other.decl());
+}
+
+// Different aspects of dependent owner implementation
+aspect DependentOwners {
+  syn lazy TypeDecl DependentOwner.getBasicType() = getInner().original();
+
+  syn ASTNode DependentOwner.getNode();
+  eq DependentExprOwner.getNode() = getExpr();
+  eq DependentParamOwner.getNode() = getParam();
+  eq DependentFieldOwner.getNode() = getField();
+
+
+}

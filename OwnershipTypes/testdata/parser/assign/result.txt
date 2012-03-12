@@ -1,0 +1,35 @@
+AST.CompilationUnit []
+  AST.List
+  AST.List
+    AST.ClassDecl [D]
+      AST.Modifiers
+        AST.List
+      AST.Opt
+      AST.List
+      AST.List
+        AST.MethodDecl [foo]
+          AST.Modifiers
+            AST.List
+          AST.PrimitiveTypeAccess [@primitive, void]
+          AST.List
+          AST.List
+          AST.Opt
+            AST.Block
+              AST.List
+                AST.ExprStmt
+                  AST.AssignSimpleExpr
+                    AST.Dot
+                      AST.PackageAccess [e.g]
+                      AST.VarAccess [f]
+                    AST.ThisAccess
+        AST.ConstructorDecl
+          AST.Modifiers
+            AST.List
+          AST.List
+          AST.List
+          AST.Opt
+            AST.ExprStmt
+              AST.SuperConstructorAccess
+                AST.List
+          AST.Block
+            AST.List

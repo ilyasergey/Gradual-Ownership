@@ -1,0 +1,230 @@
+import java.util.Collection;
+import java.util.ArrayList;
+import java.util.HashSet;
+
+aspect CollectingUsages {
+
+
+  syn lazy Collection<OwnerDeclaration> ASTNode.localUsedDependentOwners() {
+    Collection<OwnerDeclaration> result = new HashSet<OwnerDeclaration>();
+    for (int i = 0; i < getNumChild(); i++) {
+      result.addAll(getChild(i).localUsedDependentOwners());
+    }
+    return result;
+  }
+
+  eq Expr.localUsedDependentOwners() {
+    Collection<OwnerDeclaration> result = super.localUsedDependentOwners();
+    if (this instanceof TypeAccess) return result;
+    if (this instanceof Owner) return result;
+    TypeDecl own = type();
+    TypeDecl expected = expectedOwnType();
+    if (!own.conformsTo(expected) && expected instanceof OwnershipType) {
+      for (OwnerDeclaration od : ((OwnershipType)expected).argsAsList()) {
+        if (od instanceof DependentOwner || od instanceof FixedThis) {
+          result.add(od);
+        }
+      }
+    }
+    return result;
+  }
+
+  syn lazy Collection<TypeDecl> ASTNode.localCasts() {
+    Collection<TypeDecl> result = new HashSet<TypeDecl>();
+    for (int i = 0; i < getNumChild(); i++) {
+      result.addAll(getChild(i).localCasts());
+    }
+    return result;
+  }
+  eq Expr.localCasts() {
+    Collection<TypeDecl> result = super.localCasts();
+    if (!isLeftSideOfDot() && needCast() ) {
+      result.add(expectedOwnType().original());
+    }
+    return result;
+  }
+
+  syn lazy Collection<TypeDecl> ASTNode.localUpdates() {
+    Collection<TypeDecl> result = new HashSet<TypeDecl>();
+    for (int i = 0; i < getNumChild(); i++) {
+      result.addAll(getChild(i).localUpdates());
+    }
+    return result;
+  }
+  eq Expr.localUpdates() {
+    Collection<TypeDecl> result = super.localUpdates();
+    if (!isLeftSideOfDot() && hasUsedDependentOwners()) {
+      result.add(type().original());
+    }
+    return result;
+  }
+
+  syn boolean Expr.isLeftSideOfDot() {
+    ASTNode parent = getParent();
+    if (!(parent instanceof AbstractDot)) return false;
+    return this == ((AbstractDot)parent).getLeft();
+  }
+
+  // Collect all used dependent owners in a method body
+//  coll Collection<OwnerDeclaration> BodyDecl.usedDependentOwnersImpl()
+//       [new HashSet<OwnerDeclaration>()]
+//       with addAll
+//       root BodyDecl;
+//
+//  Expr contributes usedDependentOwners()
+//  when (!(this instanceof AbstractDot))
+//  to BodyDecl.usedDependentOwnersImpl()
+//  for enclosingBodyDecl();
+//
+//  syn lazy Collection<OwnerDeclaration> BodyDecl.usedDependentOwners() = usedDependentOwnersImpl();
+//
+//  syn lazy Collection<OwnerDeclaration> Expr.usedDependentOwners() {
+//    Collection<OwnerDeclaration> result = new HashSet<OwnerDeclaration>();
+//    if (this instanceof TypeAccess) return result;
+//    if (this instanceof Owner) return result;
+//    TypeDecl own = type();
+//    TypeDecl expected = expectedOwnType();
+//
+//    System.out.println(toString() + "-" + getLine(getStart()) + "-" + getColumn(getStart()));
+//
+//    if (!own.conformsTo(expected) && expected instanceof OwnershipType) {
+//      for (OwnerDeclaration od : ((OwnershipType)expected).argsAsList()) {
+//        if (od instanceof DependentOwner || od instanceof FixedThis) {
+//          result.add(od);
+//        }
+//      }
+//    }
+//    return result;
+//  }
+
+  inh lazy boolean Expr.isUsedAsDependent(OwnerDeclaration od, String position);
+  eq MethodDecl.getChild().isUsedAsDependent(OwnerDeclaration od, String position) {
+    final Collection<OwnerDeclaration> declarations = localUsedDependentOwners();
+    for (OwnerDeclaration declaration : declarations) {
+      if (declaration.toString().equals(od.toString()) &&
+          declaration.toString().contains("_" + position + "_")) {
+        if (od instanceof DependentOwner && declaration instanceof DependentOwner) {
+          return ((DependentOwner)od).getNode() == ((DependentOwner)declaration).getNode();
+        }
+        return  true;
+      }
+    }
+    return false;
+  }
+  eq Program.getChild().isUsedAsDependent(OwnerDeclaration od, String position) = false;
+
+  syn lazy boolean Expr.hasUsedDependentOwners() {
+    TypeDecl type = type();
+    int line = getLine(getStart());
+    int column = getColumn(getStart());
+    String position = line + "_" + column;
+
+    if (type instanceof OwnershipType) {
+      for (OwnerDeclaration od : ((OwnershipType)type).argsAsList()) {
+        if (od instanceof  DependentOwner &&
+            ((DependentOwner)od).getNode() == this &&
+            isUsedAsDependent(od, position)) {
+              return true;
+            }
+      }
+    }
+    return false;
+  }
+  eq AbstractDot.hasUsedDependentOwners() = getRight().hasUsedDependentOwners();
+
+  syn lazy boolean Expr.needCast() {
+    if (this instanceof TypeAccess) return false;
+    if (this instanceof Owner) return false;
+    TypeDecl own = type();
+    TypeDecl expected = expectedOwnType();
+    return !own.conformsTo(expected);
+  }
+
+
+  /*
+  Surround null-aware wrappers
+  */
+  syn lazy String Expr.expectedTypeCast(String exprText) {
+    if (!needCast()) return exprText;
+    TypeDecl expected = expectedOwnType();
+    if (expected instanceof OwnershipType) {
+      StringBuffer s = new StringBuffer();
+      s.append(expected.original().fullName().replace(".", "_") + "_cast(");
+      s.append(exprText);
+      ArrayList<OwnerDeclaration> list = ((OwnershipType)expected).argsAsList();
+      for (int i = 0; i < list.size(); i ++) {
+       s.append(", ").append(list.get(i).asObject());
+      }
+      s.append(")");
+      return s.toString();
+    }
+    return exprText;
+  }
+
+  syn lazy String Expr.registerUsedDependent(String exprText) {
+    if (!hasUsedDependentOwners()) return exprText;
+    TypeDecl type = type().original();
+    if (type instanceof OwnerTypeDecl) {
+      StringBuffer s = new StringBuffer();
+      String position = _pos();
+      s.append(type.original().fullName().replace(".", "_") + "_put(");
+      s.append(exprText +", ").append("_depMap, ").append("\"" + position + "\"");
+      s.append(")");
+      return s.toString();
+    }
+    return exprText;
+  }
+
+  /*
+  Entail with unsafe cast
+  */
+  syn lazy String Expr.appendCast() {
+    if (!needCast()) return "";
+    TypeDecl expected = expectedOwnType();
+    if (expected instanceof OwnershipType) {
+      StringBuffer s = new StringBuffer();
+      s.append(".__castAs_" + expected.original().fullName().replace(".", "_") + "(");
+      ArrayList<OwnerDeclaration> list = ((OwnershipType)expected).argsAsList();
+      if (list.size() > 0) {
+        s.append(list.get(0).asObject());
+        for (int i = 1; i < list.size(); i ++) {
+         s.append(", ").append(list.get(i).asObject());
+        }
+      }
+      s.append(")");
+      return s.toString();
+    }
+    return "";
+  }
+
+  syn lazy String Expr.appendPut() {
+    if (!hasUsedDependentOwners()) return "";
+    TypeDecl type = type().original();
+    if (type instanceof OwnerTypeDecl) {
+      StringBuffer s = new StringBuffer();
+      int line = getLine(getStart());
+      int column = getColumn(getStart());
+      String position = line + "_" + column;
+      s.append(".__updateDependent_" + type.original().fullName().replace(".", "_") + "(");
+      s.append("_depMap").append(", ").append("\"" + position + "\"");
+      s.append(")");
+      return s.toString();
+    }
+    return "";
+  }
+
+
+  syn String Expr._pos() {
+    int line = getLine(getStart());
+    int column = getColumn(getStart());
+    return line + "_" + column;
+  }
+  eq AbstractDot._pos()  = getRight()._pos();
+
+
+
+  syn lazy boolean Expr.needsTreatment() = hasUsedDependentOwners() || needCast();
+
+  syn lazy String Expr.printWithChecks(String innerText) = expectedTypeCast(registerUsedDependent(innerText));
+
+}

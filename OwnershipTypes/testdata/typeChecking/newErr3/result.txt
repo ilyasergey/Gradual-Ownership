@@ -1,0 +1,2 @@
+5:5:Wrong number of ownership arguments for the type E
+5:22:Wrong number of ownership arguments for the type E

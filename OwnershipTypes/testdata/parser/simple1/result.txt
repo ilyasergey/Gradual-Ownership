@@ -1,0 +1,50 @@
+AST.CompilationUnit []
+  AST.List
+  AST.List
+    AST.ClassDecl [Foo]
+      AST.Modifiers
+        AST.List
+      AST.Opt
+      AST.List
+      AST.List
+        AST.FieldDeclaration [str]
+          AST.Modifiers
+            AST.List
+              AST.Modifier [static]
+          AST.TypeAccess [, String]
+          AST.Opt
+            AST.StringLiteral [abc]
+        AST.MethodDecl [foo]
+          AST.Modifiers
+            AST.List
+          AST.PrimitiveTypeAccess [@primitive, void]
+          AST.List
+            AST.ParameterDeclaration [i]
+              AST.Modifiers
+                AST.List
+              AST.PrimitiveTypeAccess [@primitive, int]
+          AST.List
+          AST.Opt
+            AST.Block
+              AST.List
+                AST.ExprStmt
+                  AST.Dot
+                    AST.TypeAccess [, System]
+                    AST.Dot
+                      AST.VarAccess [out]
+                      AST.MethodAccess [println]
+                        AST.List
+                          AST.AddExpr
+                            AST.VarAccess [str]
+                            AST.VarAccess [i]
+        AST.ConstructorDecl
+          AST.Modifiers
+            AST.List
+          AST.List
+          AST.List
+          AST.Opt
+            AST.ExprStmt
+              AST.SuperConstructorAccess
+                AST.List
+          AST.Block
+            AST.List

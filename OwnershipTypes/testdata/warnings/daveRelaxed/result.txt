@@ -1,0 +1,6 @@
+7:-1:WARNING: The static type Link[;(d->?);(owner->?)] of the destination expression this.next does not specify the primary owner
+8:-1:WARNING: The static type Data[;(p->?)] of the destination expression this.data does not specify the primary owner
+15:-1:WARNING: The static type Link[;(d->?);(owner->?)] of the destination expression head does not specify the primary owner
+25:-1:WARNING: The static type Link[;(d->?);(owner->?)] of the destination expression current does not specify the primary owner
+28:-1:WARNING: The static type Link[;(d->?);(owner->?)] of the destination expression current does not specify the primary owner
+42:-1:WARNING: The static type List[;(data->?);(owner->?)] of the destination expression list does not specify the primary owner

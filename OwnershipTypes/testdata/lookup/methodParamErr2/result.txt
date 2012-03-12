@@ -1,0 +1,2 @@
+5:13:Primary owner 'arg2' is not provably inside in the scope of 'owner'
+5:13:method parameter 'arg2' should be declared final to be used as an owner argument

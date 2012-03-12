@@ -1,0 +1,47 @@
+Access class_or_interface_type =
+  name.n LOWN owner_arguments.o ROWN           {: return new OwnTypeAccess (n, o); :}
+  ;
+
+List owner_arguments =
+    owner_argument.o                           {: return new List().add(o); :}
+  | owner_arguments.l COMMA owner_argument.o   {: return l.add(o); :}
+  ;
+
+Access this_prefix =
+  name.n DOT                                   {: return n; :}
+  ;
+
+Owner this_owner =
+  this_prefix.p? THIS                          {: return new ThisOwner(p); :}
+  ;
+
+Owner owner_argument =
+    QUESTION                                   {: return new UnknownOwner(); :}
+  | WORLD                                      {: return new World(); :}
+  | this_owner.t                               {: return t; :}
+  | IDENTIFIER.s                               {: return new ConcreteOwner(new Opt(), s); :}
+  | this_prefix.p THIS DOT IDENTIFIER.s        {: return new ConcreteOwner(new Opt(p), s); :}
+  ;
+
+List owner_parameters =
+    owner_parameter.o                          {: return new List().add(o); :}
+  | owner_parameters.l COMMA owner_parameter.o {: return l.add(o); :}
+  ;
+
+OwnerVariable owner_parameter =
+    IDENTIFIER.id                              {: return new OwnerVariable(id); :}
+  ;
+
+ClassDecl class_declaration =
+    modifiers.m? CLASS IDENTIFIER LOWN owner_parameters.o ROWN super.s? interfaces.i? class_body.b
+                                               {: return new OwnerClassDecl(new Modifiers(m), IDENTIFIER, o, s, i, b, new java.util.HashMap<helpers.Substitution, OwnershipClassType>()); :}
+  ;
+
+InterfaceDecl interface_declaration =
+  modifiers.m? INTERFACE IDENTIFIER LOWN owner_parameters.o ROWN extends_interfaces.i? interface_body.b
+                                               {: return new OwnerInterfaceDecl(new Modifiers(m), IDENTIFIER, o, i, b); :}
+  ;
+
+Expr cast_expression =
+  LPAREN class_or_interface_type.a RPAREN unary_expression_not_plus_minus.e {: return new CastExpr(a, e); :}
+  ;

@@ -1,0 +1,35 @@
+// Ownership-parametrized type declaration
+OwnerClassDecl : ClassDecl ::= Modifiers <ID:String> OwnerParameter:OwnerVariable* [SuperClassAccess:Access] Implements:Access* BodyDecl* <OwnershipClassTypes:java.util.Map<helpers.Substitution, OwnershipClassType>>;
+OwnerInterfaceDecl : InterfaceDecl ::= Modifiers <ID:String> OwnerParameter:OwnerVariable* SuperInterfaceId:Access* BodyDecl* /OwnershipInterfaceType*/;
+
+// Ownership parameters
+OwnerVariable ::= <ID:String>;
+BadOwnerVariable;
+
+// Ownership-parametrized type access
+OwnTypeAccess : TypeAccess ::= /<Package:String>/ /<ID:String>/ TypeAccess:Access OwnerArgument:Owner*;
+
+// Ownership arguments
+abstract Owner : Access;
+abstract KnownOwner : Owner;
+World : KnownOwner;
+UnknownOwner : Owner;
+// this-owners can be qualified
+ThisOwner : KnownOwner ::= [Qualifier:Access];
+ConcreteOwner : KnownOwner ::= [Qualifier:Access] <ID:String>;
+FixedThis : KnownOwner ::= <Expr:Expr>;
+
+// Intermediate language constructs
+abstract DependentOwner : KnownOwner ::= <ID:String> <Inner:TypeDecl>;
+DependentExprOwner : DependentOwner ::= <Expr:Expr>;
+DependentParamOwner : DependentOwner ::= <Param:ParameterDeclaration>;
+DependentFieldOwner : DependentOwner ::= <Field:FieldDeclaration>;
+
+// DependentVarOwner : DependentOwner ::= <Var:VariableDeclaration> <Inner:TypeDecl>;
+
+// Ownership type is a type declaration and a substitution
+OwnershipClassType : OwnerClassDecl ::= <Inner:OwnerClassDecl> <Substitution:Substitution>;
+OwnershipInterfaceType : OwnerInterfaceDecl ::= <Inner:OwnerInterfaceDecl> <Substitution:Substitution>;
+
+// Any type
+AnyType : TypeDecl;

@@ -1,0 +1,60 @@
+import helpers.*;
+import java.util.HashMap;
+
+// Implementation of the manifest ownership conventions
+aspect ManifestConventions {
+
+  syn boolean ClassDecl.hasParametrizedParents() {
+    if (hasSuperClassAccess() && (getSuperClassAccess() instanceof OwnTypeAccess || getSuperClassAccess().type() instanceof OwnershipType)) {
+      return true;
+    }
+    for (int i = 0; i< getNumImplements(); i++) {
+      if (getImplements(i) instanceof OwnTypeAccess || getImplements(i).type() instanceof OwnershipType) {
+        return true;
+      }
+    }
+     return false;
+  }
+
+  syn boolean InterfaceDecl.hasParametrizedParents() {
+    for (int i = 0; i< getNumSuperInterfaceId(); i++) {
+      if (getSuperInterfaceId(i) instanceof OwnTypeAccess || getSuperInterfaceId(i).type() instanceof OwnershipType) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+
+  rewrite ClassDecl {
+    when (!(this instanceof OwnerTypeDecl) && hasParametrizedParents())
+    to OwnerClassDecl {
+        OwnerClassDecl decl = new OwnerClassDecl(
+          getModifiers(),
+          getID(),
+          new List(),
+          getSuperClassAccessOpt(),
+          getImplementsList(),
+          getBodyDeclList(),
+          new HashMap<Substitution, OwnershipClassType>()
+        );
+        return decl;
+    }
+  }
+
+  rewrite InterfaceDecl {
+    when (!(this instanceof OwnerTypeDecl) && hasParametrizedParents())
+    to OwnerInterfaceDecl {
+        OwnerInterfaceDecl decl = new OwnerInterfaceDecl(
+          getModifiers(),
+          getID(),
+          new List(),
+          getSuperInterfaceIdList(),
+          getBodyDeclList()
+        );
+
+        return decl;
+    }
+  }
+
+}

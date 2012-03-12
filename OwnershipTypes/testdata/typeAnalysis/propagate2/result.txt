@@ -1,0 +1,1 @@
+14:-1:can not assign c_fail of type C[;(o1->owner1);(o2->owner1)] a value of type C[;(o1->owner1);(o2->owner2);(this->c1)]

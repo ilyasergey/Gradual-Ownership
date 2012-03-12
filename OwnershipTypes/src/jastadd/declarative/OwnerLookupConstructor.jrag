@@ -1,0 +1,26 @@
+/*
+ * One more bunch of hacks into the JastAddJ implementation
+ */
+aspect OwnerLookupConstructor {
+  refine LookupConstructor eq ClassInstanceExpr.applicableAndAccessible(ConstructorDecl decl) =
+    decl.applicableWithOwners(this, getArgList()) &&
+    decl.accessibleFrom(hostType()) &&
+    (!decl.isProtected() || hasTypeDecl() || decl.hostPackage().equals(hostPackage()));
+
+  public boolean ConstructorDecl.applicableWithOwners(ClassInstanceExpr expr, List argList) {
+    if(getNumParameter() != argList.getNumChild())
+      return false;
+    final TypeDecl type = expr.type();
+    final Substitution subst = type.getSubstitution();
+    for(int i = 0; i < getNumParameter(); i++) {
+      final Expr child = (Expr) argList.getChild(i);
+      TypeDecl argType = child.type();
+      TypeDecl paramType = getParameter(i).type();
+      if(!argType.instanceOf(paramType.map(subst))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+}

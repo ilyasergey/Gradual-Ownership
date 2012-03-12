@@ -1,0 +1,32 @@
+import java.io.File;
+
+aspect Translation {
+  syn lazy String CompilationUnit.destinationPath() {
+    if(options().hasValueForOption("-d")) {
+      return options().getValueForOption("-d");
+    } else {
+      return System.getProperty("user.dir") + File.separator + "out";
+    }
+  }
+
+  public void CompilationUnit.generateTranslatedFile() {
+    String fileName = destinationPath() + File.separator + relativeName();
+    if(options().verbose()) System.out.println("Writing translated file to " + fileName);
+    try{
+      File dest = new File(fileName);
+      File parentFile = dest.getParentFile();
+      if(parentFile != null && !parentFile.exists()) {
+        parentFile.mkdirs();
+      }
+      if (!dest.exists()) {
+        dest.createNewFile();
+      }
+      FileWriter f = new FileWriter(fileName);
+      BufferedWriter out = new BufferedWriter(f);
+      out.write(toStringTransform());
+      out.close();
+    } catch (Exception e) {
+      System.err.println("Error: " + e.getMessage());
+    }
+  }
+}

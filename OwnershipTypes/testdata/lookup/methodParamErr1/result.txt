@@ -1,0 +1,3 @@
+5:-1:can not assign e of type E[;(owner1->badOwner)] a value of type E[;(owner1->badOwner)]
+5:9:several owner candidates named 'owner' defined in scope
+5:30:several owner candidates named 'owner' defined in scope

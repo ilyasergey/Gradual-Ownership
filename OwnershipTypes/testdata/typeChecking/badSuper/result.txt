@@ -1,0 +1,2 @@
+6:28:super type should take ownership parameters
+6:55:super type should take ownership parameters

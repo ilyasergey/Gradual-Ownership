@@ -1,0 +1,29 @@
+aspect OwnerNameCheck {
+
+  public void ConcreteOwner.nameCheck() {
+    // No owner defined
+    SimpleSet decls = decls();
+    if(decls.isEmpty()) {
+      myError("no owner variable '" + name() + "' defined in scope");
+      return;
+    }
+    // Several owners in scope
+    if (decls.size() > 1) {
+      StringBuffer s = new StringBuffer();
+      s.append("several owner candidates named '" + name() + "' defined in scope");
+      myError(s.toString());
+      return;
+    }
+    OwnerDeclaration decl = (OwnerDeclaration)decls.iterator().next();
+    if (decl instanceof Variable && !((Variable)decl).isFinal()) {
+      if (decl instanceof ParameterDeclaration) {
+        myError("method parameter '" + name() + "' should be declared final to be used as an owner argument");
+      } else if (decl instanceof FieldDeclaration) {
+        myError("field '" + name() + "' should be declared final to be used as an owner argument");
+      } else {
+        myError("local variable '" + name() + "' should be declared final to be used as an owner argument");
+      }
+    }
+  }
+
+}

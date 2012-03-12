@@ -1,0 +1,96 @@
+aspect ExpectedOwnershipTypes {
+
+  // `up' helper function
+  syn lazy TypeDecl TypeDecl.up(TypeDecl level) {
+    for (TypeDecl st : supers()) {
+      if (st.original() == level.original()) {
+        return st;
+      }
+    }
+    return null;
+  }
+
+  // `more defined than' relation
+  syn lazy boolean TypeDecl.mdt(TypeDecl other);
+  eq TypeDecl.mdt(TypeDecl other) = this.instanceOf(other);
+  eq OwnershipClassType.mdt(TypeDecl other) {
+    if (!(other instanceof OwnershipType)) return false;
+    TypeDecl mediator = up(other);
+    if (mediator == null || !(mediator instanceof OwnershipType)) return false;
+    OwnershipType source = (OwnershipType) mediator;
+    OwnershipType target = (OwnershipType) other;
+    return ((TypeDecl)source).mdtOneLevel(target);
+  }
+  eq OwnershipInterfaceType.mdt(TypeDecl other) {
+    if (!(other instanceof OwnershipType)) return false;
+    TypeDecl mediator = up(other);
+    if (mediator == null || !(mediator instanceof OwnershipType)) return false;
+    OwnershipType source = (OwnershipType) mediator;
+    OwnershipType target = (OwnershipType) other;
+    return ((TypeDecl)source).mdtOneLevel(target);
+  }
+
+  syn lazy boolean TypeDecl.mdtOneLevel(OwnershipType other) {
+    if (!(this instanceof OwnershipType)) return false;
+    ArrayList<OwnerDeclaration> selfArgs = ((OwnershipType)this).argsAsList();
+    ArrayList<OwnerDeclaration> otherArgs = other.argsAsList();
+    if (selfArgs.size() != otherArgs.size()) {
+      return false;
+    }
+    for (int i = 0; i < selfArgs.size(); i++) {
+      OwnerDeclaration l = selfArgs.get(i);
+      OwnerDeclaration r = otherArgs.get(i);
+      if (!(l.equals(r) || r.isUnknownOwner())) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**************
+   Expected types
+   **************/
+  syn lazy TypeDecl Program.anyType() = new AnyType();
+  eq Program.getChild().anyType() = anyType();
+  inh TypeDecl Expr.anyType();
+  inh TypeDecl Stmt.anyType();
+
+  syn boolean TypeDecl.isAny() = this instanceof AnyType;
+
+  syn lazy boolean TypeDecl.conformsTo(TypeDecl expected) = expected.isAny() || this.instanceOf(expected);
+  eq UnknownType.conformsTo(TypeDecl expected) = true;
+  eq PrimitiveType.conformsTo(TypeDecl expected) = (expected instanceof PrimitiveType) || super.conformsTo(expected);
+  eq OwnershipClassType.conformsTo(TypeDecl expected) = expected.isAny() || this.mdt(expected);
+  eq OwnershipInterfaceType.conformsTo(TypeDecl expected) = expected.isAny() || this.mdt(expected);
+
+  inh lazy TypeDecl Expr.expectedOwnType();
+
+  // default implementation
+  eq Program.getChild().expectedOwnType() = anyType();
+  eq Expr.getChild().expectedOwnType() = anyType();
+  eq VariableDeclaration.getInit().expectedOwnType() = type();
+  eq FieldDeclaration.getInit().expectedOwnType() = type();
+  eq ReturnStmt.getResult().expectedOwnType() = expectedMethodType();
+  eq AssignSimpleExpr.getSource().expectedOwnType()  {
+    Expr dest = getDest();
+    return dest.unfill(dest.type());
+  }
+  eq MethodAccess.getArg(int i).expectedOwnType() {
+    MethodDecl decl = decl();
+    if (decl == null || getNumArg() != decl.getNumParameter()) return unknownType();
+    ParameterDeclaration param = decl.getParameter(i);
+    return mapType(param.type());
+  }
+
+  inh lazy TypeDecl ReturnStmt.expectedMethodType();
+  eq Program.getChild().expectedMethodType() = anyType();
+  eq MethodDecl.getBlock().expectedMethodType() = type();
+
+  syn boolean TypeDecl.specified() {
+    if (!(this instanceof OwnershipType)) return true;
+    java.util.ArrayList<OwnerDeclaration> args = ((OwnershipType) this).argsAsList();
+    if (args.size() == 0) return true;
+    return !args.get(0).isUnknownOwner();
+  }
+
+}

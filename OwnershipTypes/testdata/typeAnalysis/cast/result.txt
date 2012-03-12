@@ -1,0 +1,1 @@
+11:-1:D[;(o1->Main.this);(o2->world);(this->d)] can not be cast into D[;(o1->world);(o2->world)]

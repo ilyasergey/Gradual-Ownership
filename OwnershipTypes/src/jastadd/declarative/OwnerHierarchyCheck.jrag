@@ -1,0 +1,39 @@
+aspect OwnershipHierarchyCheck {
+
+  refine TypeHierarchyCheck eq MethodDecl.mayOverrideReturn(MethodDecl m) {
+    final TypeDecl self = this.getEnclosingType();
+    final TypeDecl other = m.getEnclosingType();
+
+    if (self.conformsTo(other)) return true;
+    if (!self.instanceOf(other.original())) return false;
+
+    final TypeDecl lifted = self.up(other.original());
+    if (lifted == other) return true;
+    final Substitution subst = lifted.getSubstitution();
+
+    // Return type
+    final TypeDecl t1 = type();
+    final TypeDecl t2 = updateWithCurrentThis(m.type().map(subst), lookupThisOwner());
+    if (!t1.conformsTo(t2)) {
+      return false;
+    }
+
+    // parameter types
+    for(int i = 0; i < getNumParameter(); i++) {
+      final TypeDecl myType = getParameter(i).type();
+      final TypeDecl mapped = updateWithCurrentThis(m.getParameter(i).type().map(subst), lookupThisOwner());
+      if(myType != mapped) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  inh boolean Expr.inStaticMethod(); // Only world is accessible
+  inh boolean MethodDecl.inStaticMethod();
+
+  eq Program.getChild().inStaticMethod() = false;
+  eq FieldDeclaration.getInit().inStaticMethod() = isStatic() || hostType().isInterfaceDecl();
+  eq MethodDecl.getBlock().inStaticMethod() = isStatic() || inStaticMethod();
+
+}

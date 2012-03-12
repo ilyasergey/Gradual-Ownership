@@ -1,0 +1,36 @@
+AST.CompilationUnit []
+  AST.List
+  AST.List
+    AST.OwnerInterfaceDecl [D]
+      AST.Modifiers
+        AST.List
+      AST.List
+        AST.OwnerVariable [owner1]
+        AST.OwnerVariable [owner2]
+      AST.List
+        AST.OwnTypeAccess [, Unknown]
+          AST.TypeAccess [, E]
+          AST.List
+            AST.ConcreteOwner [owner1]
+              AST.Opt
+      AST.List
+        AST.MethodDecl [foo]
+          AST.Modifiers
+            AST.List
+          AST.OwnTypeAccess [, D]
+            AST.TypeAccess [, D]
+            AST.List
+              AST.ConcreteOwner [owner2]
+                AST.Opt
+              AST.World
+          AST.List
+            AST.ParameterDeclaration [e]
+              AST.Modifiers
+                AST.List
+              AST.OwnTypeAccess [, Unknown]
+                AST.TypeAccess [, E]
+                AST.List
+                  AST.ConcreteOwner [owner2]
+                    AST.Opt
+          AST.List
+          AST.Opt

@@ -1,0 +1,609 @@
+import helpers.*;
+import java.util.Collection;
+import java.util.ArrayList;
+
+/********************************
+Equivalences and orders on owners
+*********************************/
+aspect OwnerOrdering {
+
+  // Lookup for the witness of the `inside' relation between ;eft and right owner declarations
+  inh lazy boolean BodyDecl.lookupOwnerInside(OwnerDeclaration left, OwnerDeclaration right);
+  // To perform the lookup from the declaration
+  inh boolean ASTNode.lookupOwnerInside(OwnerDeclaration left, OwnerDeclaration right);
+  syn boolean BadOwnerVariable.lookupOwnerInside(OwnerDeclaration left, OwnerDeclaration right) = false;
+
+  // a stub for all nodes
+  eq Program.getChild().lookupOwnerInside(OwnerDeclaration left, OwnerDeclaration right) = false;
+
+  // Owner-parametrized classes and interfaces
+  /* (IN-ENV) + (CLASS) */
+  eq OwnerClassDecl.getChild().lookupOwnerInside(OwnerDeclaration left, OwnerDeclaration right) {
+    if (left == owner() || left.isThisOwner()) {
+      for (OwnerDeclaration od : getOwnerParameters()) {
+        if (right == od) return true;
+      }
+    }
+    return false;
+  }
+
+  /* (IN-ENV) + (CLASS) */
+  eq OwnerInterfaceDecl.getChild().lookupOwnerInside(OwnerDeclaration left, OwnerDeclaration right) {
+    if (left == owner() || left.isThisOwner()) {
+      for (OwnerDeclaration od : getOwnerParameters()) {
+        if (right == od) return true;
+      }
+    }
+    return false;
+  }
+
+  eq Block.getStmt(int index).lookupOwnerInside(OwnerDeclaration left, OwnerDeclaration right) {
+    if (left instanceof Variable) {
+      Variable v = (Variable)left;
+      TypeDecl varType = v.type();
+      OwnerDeclaration varOwner = varType.owner();
+      if (varOwner.isConcreteOwner()) {
+         /* (IN-THIS) + (IN-TRANS) */
+         return varOwner == right || ((ASTNode) v).lookupOwnerInside(varOwner, right);
+      }
+    }
+    // go above
+    return lookupOwnerInside(left, right);
+   }
+
+}
+
+/*************************
+Resolving ownership types
+**************************/
+aspect OwnershipTypeLookup {
+
+   interface OwnerTypeDecl {
+     int getNumOwnerParameter();
+     Substitution getSubstitution();
+   }
+
+   OwnerClassDecl implements OwnerTypeDecl;
+   OwnerInterfaceDecl implements OwnerTypeDecl;
+
+   interface OwnershipType {
+     OwnerDeclaration owner();
+     Substitution getSubstitution();
+     TypeDecl getInner();
+     boolean consistent(TypeDecl other);
+     TypeDecl map(Substitution subst);
+   }
+
+   syn TypeDecl TypeDecl.map(Substitution subst) = this;
+   eq OwnershipType.map(Substitution subst) {
+     Substitution newSubst = subst.compose(getSubstitution());
+     return getInner().lookupOwnershipType(newSubst);
+   }
+
+   OwnershipClassType implements OwnershipType;
+   OwnershipInterfaceType implements OwnershipType;
+
+  // Resolve owner-parametrized type declaration
+  syn lazy TypeDecl TypeAccess.originalDecl();
+  eq TypeAccess.originalDecl() = decl();
+  eq OwnTypeAccess.originalDecl() = getTypeAccess().type();
+
+  // constructors
+  eq OwnershipClassType.constructors() = getInner().constructors();
+  eq OwnershipInterfaceType.constructors() = getInner().constructors();
+
+  syn Iterator OwnershipClassType.methodsIterator() = getInner().methodsIterator();
+  syn Iterator OwnershipInterfaceType.methodsIterator() = getInner().methodsIterator();
+
+  syn Iterator OwnershipClassType.fieldsIterator() = getInner().fieldsIterator();
+  syn Iterator OwnershipInterfaceType.fieldsIterator() = getInner().fieldsIterator();
+
+  // full name
+  eq OwnershipClassType.fullName() = toString();
+  eq OwnershipInterfaceType.fullName() = toString();
+
+  syn lazy final List OwnerClassDecl.getOwnershipClassTypeList() = new List();
+  syn lazy final List OwnerInterfaceDecl.getOwnershipInterfaceTypeList() = new List();
+
+  // Return an interface type with unknown owners
+  syn lazy TypeDecl OwnerTypeDecl.lookupWithUnknowns() {
+    List<Owner> args = new List<Owner>();
+    for (int i = 0; i < getNumOwnerParameter(); i++) {
+      args.add(new UnknownOwner());
+    }
+    return lookupOwnershipType(args);
+  }
+
+  syn lazy TypeDecl OwnerTypeDecl.lookupWithWorlds() {
+    List<Owner> args = new List<Owner>();
+    for (int i = 0; i < getNumOwnerParameter(); i++) {
+      args.add(world());
+    }
+    return lookupOwnershipType(args);
+  }
+
+  // Lookup and memorize an ownership type with a particular substitution subst
+  syn lazy TypeDecl TypeDecl.lookupOwnershipType(Substitution subst);
+
+  eq TypeDecl.lookupOwnershipType(Substitution subst) = this;
+
+  eq OwnerClassDecl.lookupOwnershipType(Substitution subst) {
+    if (subst.getDomainSizeNoThis() != getNumOwnerParameter()) {
+      return unknownType(); // type error
+    }
+    // perform lookup
+    OwnershipClassType type = getOwnershipClassTypes().get(subst);
+    if (type != null) return type;
+
+/*
+    for(int i = 0; i < getNumOwnershipClassType(); i++) {
+      OwnershipClassType type = getOwnershipClassType(i);
+      if(type.getInner() == this && type.getSubstitution() == subst) {
+        return type;
+      }
+    }
+*/
+    // create new ownership class type
+    OwnershipClassType ot = new OwnershipClassType();
+    ot.setInner(this);
+    ot.setID(getID());
+    ot.setModifiers(getModifiers().fullCopy());
+    ot.setParent(this);
+
+    final Substitution subst1 = subst.compose(getSubstitution());
+    ot.setSubstitution(subst.compose(getSubstitution()));
+//    addOwnershipClassType(ot); // memorize ownership type
+    getOwnershipClassTypes().put(subst1, ot); // memorize ownership type
+    return ot;
+  }
+
+  eq OwnerInterfaceDecl.lookupOwnershipType(Substitution subst) {
+    if (subst.getDomainSizeNoThis() != getNumOwnerParameter()) {
+      return unknownType(); // type error
+    }
+    // perform lookup
+    for(int i = 0; i < getNumOwnershipInterfaceType(); i++) {
+      OwnershipInterfaceType type = getOwnershipInterfaceType(i);
+      if(type.getInner() == this && type.getSubstitution() == subst) {
+        return type;
+      }
+    }
+    // create new ownership class type
+    OwnershipInterfaceType ot = new OwnershipInterfaceType();
+    ot.setInner(this);
+    ot.setID(getID());
+    ot.setModifiers(getModifiers().fullCopy());
+    ot.setSubstitution(subst.compose(getSubstitution()));
+    addOwnershipInterfaceType(ot); // memorize ownership type
+    return ot;
+  }
+
+  syn lazy TypeDecl OwnerTypeDecl.lookupOwnershipType(List<Owner> args) {
+    if (args.getNumChild() != getNumOwnerParameter()) {
+      return unknownType(); // type error
+    }
+    // create substitution
+    Substitution subst = Substitution.empty();
+    for (int i = 0; i < getNumOwnerParameter(); i++) {
+      OwnerVariable ov = getOwnerParameter(i); // class parameter
+      OwnerDeclaration decl = args.getChild(i).decl(); // target owner declaration
+      subst = subst.update(ov.name(), decl);
+    }
+    return lookupOwnershipType(subst);
+  }
+
+  // Returns a parametrized type instead of a raw type declaration
+  eq OwnTypeAccess.type() {
+    TypeDecl decl = originalDecl();
+    if (decl instanceof OwnerTypeDecl) {
+      return ((OwnerTypeDecl)decl).lookupOwnershipType(getOwnerArgumentList());
+    }
+    return decl;
+  }
+
+  // Wrap `raw' types into ownership types for type accesses
+  refine TypeAnalysis eq TypeAccess.type() {
+    ASTNode parent = getParent();
+    if (   parent instanceof OwnTypeAccess
+        || parent instanceof ConstructorDecl) {
+      return TypeAnalysis.TypeAccess.type();
+    }
+
+    TypeDecl decl = originalDecl();
+    if (decl instanceof OwnershipType) {
+      return decl;
+    }
+    if (decl instanceof OwnerTypeDecl) { // substitute unknown arguments
+      return ((OwnerTypeDecl)decl).lookupWithUnknowns();
+    }
+    return decl;
+  }
+
+}
+
+/*************************************************
+Subtyping and type conversions for ownership types
+*************************************************/
+aspect OwnerTypeConversion {
+
+  syn TypeDecl TypeDecl.original();
+  eq TypeDecl.original() = this;
+  eq OwnershipType.original() = getInner();
+
+  eq OwnershipType.isParametrized() { return getInner().isParametrized(); }
+
+  syn boolean TypeDecl.isGood() = !isUnknownOwner();
+  eq OwnershipType.isGood()  {
+    if (isUnknownOwner()) return false;
+    for (OwnerDeclaration node : argsAsList()) {
+      if (!node.isConcreteOwner()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Implicit substitution of a primary owner
+  syn TypeDecl TypeDecl.fillWithPrimaryIOwner(Access access) {
+    if (access instanceof OwnTypeAccess) return access.type(); // no implicit filling for explicitly parametrized
+
+    final TypeDecl t = access.type();
+    if (!t.isParametrized()) return t; // erroneous super-class
+
+    final TypeDecl original = t.original();
+    Substitution subst = Substitution.empty();
+    for (int i = 0; i < original.getNumOwnerParameter(); i++) {
+      OwnerDeclaration od = original.getOwnerParameter(i);
+      subst = subst.update(od.name(), this.owner());
+    }
+    return original.lookupOwnershipType(subst);
+  }
+
+  syn lazy Collection<TypeDecl> TypeDecl.supertypes(Collection<TypeDecl> result);
+  syn lazy Collection<TypeDecl> TypeDecl.supers() {
+    Collection<TypeDecl> set = new java.util.HashSet<TypeDecl>();
+    set.add(this);
+    return supertypes(set);
+  }
+
+  eq TypeDecl.supertypes(Collection<TypeDecl> result) = result;
+
+  eq ClassDecl.supertypes(Collection<TypeDecl> result) {
+    Collection<TypeDecl> localResult = new HashSet<TypeDecl>();
+    if (hasSuperClassAccess()) {
+      final TypeDecl type = fillWithPrimaryIOwner(getSuperClassAccess());
+      if (type.isGood()) {
+        localResult.add(type);
+      }
+    }
+    for (Access access : getImplementsList()) {
+      TypeDecl type = fillWithPrimaryIOwner(access);
+      if (type.isGood()) {
+        localResult.add(type);
+      }
+    }
+    // Process parents
+    for (TypeDecl elem : localResult) {
+      if (!result.contains(elem)) {
+        result.add(elem);
+        elem.supertypes(result);
+      }
+    }
+    return result;
+  }
+
+  eq InterfaceDecl.supertypes(Collection<TypeDecl> result) {
+    Collection<TypeDecl> localResult = new HashSet<TypeDecl>();
+    for (Access access : getSuperInterfaceIdList()) {
+      TypeDecl type = fillWithPrimaryIOwner(access);
+      if (type.isGood()) {
+        localResult.add(type);
+      }
+    }
+    // Process parents
+    for (TypeDecl elem : localResult) {
+      if (!result.contains(elem)) {
+        result.add(elem);
+        elem.supertypes(result);
+      }
+    }
+    return result;
+  }
+
+  // map inner supertypes with actual substitutions
+  eq OwnershipType.supertypes(Collection<TypeDecl> result) {
+      final TypeDecl inner = getInner();
+      Collection<TypeDecl> basics = inner.supers();
+      for (TypeDecl basic : basics) {
+        if (basic != inner && basic.isGood()) {
+          if (basic instanceof OwnershipType) {
+           OwnershipType ot = (OwnershipType)basic;
+           result.add(ot.map(getSubstitution()));
+          } else {
+           result.add(basic);
+          }
+        }
+      }
+    return result;
+  }
+
+  // Adjust subtyping relation
+  // For more details see TypeAnalysis.jrag, aspect TypeWideningAndIdentity
+  eq OwnershipClassType.instanceOf(TypeDecl type) {
+    if (!type.original().isSupertypeOfClassDecl(getInner())) {
+      return false;
+    }
+    if (type.isObject()) return  true;
+    /* (GRAD-SUB) */
+    final Collection<TypeDecl> supers = this.supers();
+    for (TypeDecl base : supers) {
+      if (base.consistent(type)) return true;
+    }
+    return false;
+  }
+
+  refine TypeAnalysis eq ClassDecl.instanceOf(TypeDecl type) {
+    if (TypeAnalysis.ClassDecl.instanceOf(type)) {
+      return true;
+    }
+    for (TypeDecl t : this.supers()) {
+      if ((t instanceof OwnershipType) && type.consistent(t)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  refine TypeAnalysis eq InterfaceDecl.instanceOf(TypeDecl type) {
+    if (TypeAnalysis.InterfaceDecl.instanceOf(type)) {
+      return true;
+    }
+    for (TypeDecl t : this.supers()) {
+      if ((t instanceof OwnershipType) && type.consistent(t)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  eq OwnershipInterfaceType.instanceOf(TypeDecl type) {
+    // todo add parameter checking
+    if (!type.original().isSupertypeOfInterfaceDecl(getInner())) {
+      return false;
+    }
+    if (type.isObject()) return  true;
+    /* (GRAD-SUB) */
+    for (TypeDecl base : this.supers()) {
+      if (base.consistent(type)) return true;
+    }
+    return false;
+  }
+
+  eq AnonymousDecl.instanceOf(TypeDecl type) {
+    final Collection<TypeDecl> supers = supers();
+    for (TypeDecl st : supers()) {
+      if (st.consistent(type)) {
+        return true;
+      }
+    }
+    return super.consistent(type);
+  }
+
+  // Delegation of different look-ups
+  eq OwnershipClassType.memberFields(String name) = getInner().memberFields(name);
+  eq OwnershipInterfaceType.memberFields(String name) = getInner().memberFields(name);
+
+  eq OwnershipClassType.memberFieldsMap() = getInner().memberFieldsMap();
+  eq OwnershipInterfaceType.memberFieldsMap() = getInner().memberFieldsMap();
+
+  eq OwnershipClassType.memberMethods(String name) = getInner().memberMethods(name);
+  eq OwnershipInterfaceType.memberMethods(String name) = getInner().memberMethods(name);
+
+  eq OwnershipClassType.memberTypes(String name) = getInner().memberTypes(name);
+  eq OwnershipInterfaceType.memberTypes(String name) = getInner().memberTypes(name);
+
+}
+
+/*
+Some hack on the original implementation
+*/
+aspect OwnerSuperClasses {
+
+  public ClassDecl OwnerClassDecl.superclass() {
+    if(isObject())
+      return null;
+    if(hasSuperClassAccess() && !isCircular() && getSuperClassAccess().type().original().isClassDecl())
+      return (ClassDecl)getSuperClassAccess().type().original();
+    return (ClassDecl)typeObject();
+  }
+
+  refine SuperClasses eq PrimitiveType.superclass() = getSuperClassAccess().type().original();
+
+  public Iterator OwnerClassDecl.interfacesIterator() {
+    return new Iterator() {
+      public boolean hasNext() {
+        computeNextCurrent();
+        return current != null;
+      }
+      public Object next() {
+        return current;
+      }
+      public void remove() {
+        throw new UnsupportedOperationException();
+      }
+      private int index = 0;
+      private TypeDecl current = null;
+      private void computeNextCurrent() {
+        current = null;
+        if(isObject() || isCircular())
+          return;
+        while(index < getNumImplements()) {
+          TypeDecl typeDecl = getImplements(index++).type().original();
+          if(!typeDecl.isCircular() && typeDecl.isInterfaceDecl()) {
+            current = typeDecl;
+            return;
+          }
+        }
+      }
+    };
+  }
+
+  public Iterator OwnerInterfaceDecl.superinterfacesIterator() {
+    return new Iterator() {
+      public boolean hasNext() {
+        computeNextCurrent();
+        return current != null;
+      }
+      public Object next() {
+        return current;
+      }
+      public void remove() {
+        throw new UnsupportedOperationException();
+      }
+      private int index = 0;
+      private TypeDecl current = null;
+      private void computeNextCurrent() {
+        current = null;
+        if(isCircular()) return;
+        while(index < getNumSuperInterfaceId()) {
+          TypeDecl typeDecl = getSuperInterfaceId(index++).type().original();
+          if(!typeDecl.isCircular() && typeDecl.isInterfaceDecl()) {
+            current = typeDecl;
+            return;
+          }
+        }
+      }
+    };
+  }
+}
+
+aspect OwnerTypeAnalysis {
+  // Some refinement for existing constructions
+  refine TypeAnalysis eq VarAccess.type()  {
+    TypeDecl declaredType = decl().type();
+    if (isQualified()) {
+      TypeDecl qualType = qualifier().type();
+      if (qualType instanceof OwnershipType) {
+        OwnershipType ot = (OwnershipType)qualType;
+        return fill(declaredType.map(ot.getSubstitution()));
+      } else {
+        return declaredType;
+      }
+    } else {
+      return fill(declaredType);
+    }
+  }
+
+  refine TypeAnalysis eq MethodAccess.type()  {
+    TypeDecl declaredType = decl().type();
+    if (isQualified()) {
+      TypeDecl qualType = qualifier().type();
+      if (qualType instanceof OwnershipType) {
+        OwnershipType ot = (OwnershipType)qualType;
+        Substitution subst = ot.getSubstitution();
+        return fill(declaredType.map(subst));
+      } else {
+        return declaredType;
+      }
+    } else {
+      return fill(declaredType);
+    }
+  }
+
+  refine TypeAnalysis eq ThisAccess.type() {
+    TypeDecl original = TypeAnalysis.ThisAccess.type();
+    if (original instanceof OwnerTypeDecl) {
+      return original.lookupOwnershipType(((OwnerTypeDecl)original).getSubstitution());
+    } else {
+      return original;
+    }
+  }
+
+  refine TypeAnalysis eq TypeDecl.methodInvocationConversionTo(TypeDecl type) {
+     return true;
+  }
+
+
+
+}
+
+/**
+Each dependent owner is associated with an expression,
+whose result object's owner is referred.
+
+This information may propagate via aliasing
+through `final' variables.
+
+Example:
+
+final F<?> foo = expr;
+
+If the type of expr is defined as F<owner>, then `?'
+in the declaration of F can be instantiated with `owner'
+
+*/
+aspect DependentOwnerPropagation {
+
+  refine TypeAnalysis eq VariableDeclaration.type() {
+    TypeDecl original = TypeAnalysis.VariableDeclaration.type();
+    if (isFinal() && hasInit() && original instanceof OwnershipType) {
+      Expr init = getInit();
+      for (TypeDecl st : init.type().supers()) {
+        // Propagate initializer's owners through final variables;
+        if (st.consistent(original)) {
+          return st;
+        }
+      }
+      return original;
+    } else {
+      return original;
+    }
+  }
+
+  refine TypeAnalysis eq ParameterDeclaration.type() {
+    TypeDecl original = TypeAnalysis.ParameterDeclaration.type();
+    if (isFinal() && original instanceof OwnershipType) {
+      return fill(original);
+    } else {
+      return original;
+    }
+  }
+
+  refine TypeAnalysis eq FieldDeclaration.type() {
+    TypeDecl original = TypeAnalysis.ParameterDeclaration.type();
+    if (isFinal() && original instanceof OwnershipType) {
+      return fill(original);
+    } else {
+      return original;
+    }
+  }
+}
+
+aspect OwnerTypeCheck {
+  public void ASTNode.typeCheckWithOwners() {}
+
+  public void MethodAccess.typeCheckWithOwners() {
+    for(int i = 0; i < decl().getNumParameter(); i++) {
+      TypeDecl exprType = getArg(i).type();
+      TypeDecl parmType = decl().getParameter(i).type();
+      TypeDecl qualType = qualType();
+      if (qualType instanceof OwnershipType) {
+        Substitution subst = qualType.getSubstitution();
+        if (subst.isDefined("this")) {
+          subst = subst.update(qualType.original().thisOwner().name(), subst.apply("this"));
+        }
+        parmType = parmType.map(subst);
+      }
+      if(!exprType.methodInvocationConversionToWithOwners(parmType) && !exprType.isUnknown() && !parmType.isUnknown()) {
+        error("The type " + exprType.typeName() + " of expr " +
+            getArg(i) + " is not compatible with the method parameter " +
+            decl().getParameter(i));
+      }
+    }
+  }
+
+  syn lazy boolean TypeDecl.methodInvocationConversionToWithOwners(TypeDecl type) {
+    return identityConversionTo(type) || wideningConversionTo(type);
+  }
+
+}

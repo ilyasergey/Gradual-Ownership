@@ -1,0 +1,27 @@
+class C {
+  C() {
+    super();
+  }
+}
+
+class F/*<, r>*/ {
+  F() {
+    super();
+  }
+}
+
+class E/*<, o1, o2>*/ {
+  E() {
+    super();
+  }
+}
+
+class D/*<, owner>*/ {
+  void foo() {
+    E e = new E/*<owner, world, >*/();
+    C c = new C();
+  }
+  D() {
+    super();
+  }
+}

@@ -1,0 +1,2 @@
+4:-1:can not assign d1 of type D[;(owner->?)] a value of type D.Anonymous1
+4:16:class constructor D should take ownership arguments

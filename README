@@ -1,0 +1,45 @@
+The implementation of Gradual Ownership Types checker and pretty-printer
+on top of Java 1.4 Frontend
+
+Many thanks to Gorel Hedin and Torbjorn Ekman
+for provided sources of the JastAddJ compiler
+(http://jastadd.org/web/jastaddj/).
+---------------------------------------------------------------------------------
+
+1. The project has the following structure:
+
+Java1.4Frontend    - original sources of JastAddJ compiler for Java 1.4
+
+OwnershipTypes     - and implementation of Gradual Ownership Types for Java 1.4
+
+  src                - source files
+    beaver           - helper classes for the parser generation
+    helpers          - helper classes for the type checker
+    jastadd          - implementation of the compiler via JastAdd
+    parser           - grammar description
+    scanner          - the description of the lexical structure of the language
+
+  test               - JUnit test suites
+
+  testdata           - Testdata and examples
+
+  tools              - necessary libraries
+
+  build.xml          - build file
+
+
+2. Ant build-file build.xml file contains the following targets:
+
+gen         - generate scanner, parser and JastAdd artifacts
+cleanGen    - clean the results of `gen'
+clean       - delete all generated and compiled artifacts
+build       - default target, generates all artifacts and compiles generated java classes
+run.tests   - compiles and runs tests
+jar         - build a jar-archive with compiled artifacts
+zip.sources - build an archive with sources
+
+3. How to use
+
+To check the files via the front-end compiler with gradual ownership types
+
+> java OwnershipChecker java-source-files

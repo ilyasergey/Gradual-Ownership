@@ -1,0 +1,193 @@
+import java.util.*;
+
+/**
+Auxiliary attributes for ownership parameter lookup
+*/
+aspect OwnerDeclarator {
+
+  interface OwnerDeclarator {
+    SimpleSet ownerDeclaration(String name);
+  }
+
+  syn lazy SimpleSet TypeDecl.ownerDeclaration(String name) = SimpleSet.emptySet;
+
+  eq OwnerClassDecl.ownerDeclaration(String name) {
+    SimpleSet result = SimpleSet.emptySet;
+    for(int i = 0; i < getNumOwnerParameter(); i++) {
+      if(getOwnerParameter(i).name().equals(name)) {
+        result = result.add((OwnerVariable)getOwnerParameter(i));
+      }
+    }
+    return result;
+  }
+
+  eq OwnerInterfaceDecl.ownerDeclaration(String name) {
+    SimpleSet result = SimpleSet.emptySet;
+    for(int i = 0; i < getNumOwnerParameter(); i++) {
+      if(getOwnerParameter(i).name().equals(name)) {
+        result = result.add((OwnerVariable)getOwnerParameter(i));
+      }
+    }
+    return result;
+  }
+
+}
+
+/**
+Owner providers: classes, methods etc.
+*/
+aspect OwnerScope {
+
+  interface OwnerScope {
+    public SimpleSet lookupOwnerVariable(String name);
+  }
+
+  // Provides owner parameter declaration by the class or interface
+  BodyDecl implements OwnerScope;
+  //  Block implements OwnerScope;
+  // todo add more
+
+  // Inherit ownership parameter declarations in any declaration
+  // from the class definition
+  inh lazy SimpleSet BodyDecl.lookupOwnerVariable(String name);
+  inh SimpleSet ConcreteOwner.lookupOwnerVariable(String name);
+  inh SimpleSet OwnerVariable.lookupOwnerVariable(String name);
+
+  // Owner variable lookup shows the variables in scope named name
+  inh lazy SimpleSet Block.lookupOwnerVariable(String name); // method body
+
+  // A stub to provide the method for all ASTNode's
+  eq Program.getChild().lookupOwnerVariable(String name) = SimpleSet.emptySet;
+
+  syn SimpleSet TypeDecl.fieldsAsOwners(String name) {
+    SimpleSet result = SimpleSet.emptySet;
+    Iterator iter = localFields(name).iterator();
+    while (iter.hasNext()) {
+      Variable v = (Variable)iter.next();
+      if (v.isFinal()) {
+        result = result.add(v);
+      }
+    }
+    return result;
+  }
+
+  // Final fields as owners
+  eq TypeDecl.getChild().lookupOwnerVariable(String name) = fieldsAsOwners(name);
+
+  // Owner-parametrized classes and interfaces
+  eq OwnerClassDecl.getChild().lookupOwnerVariable(String name) = merge(ownerDeclaration(name), fieldsAsOwners(name));
+  eq OwnerInterfaceDecl.getChild().lookupOwnerVariable(String name) = merge(ownerDeclaration(name), fieldsAsOwners(name));
+
+  // The scope of a parameter of a method is the entire body of the method
+  eq MethodDecl.getBlock().lookupOwnerVariable(String name) {
+    // A declaration of a method parameter name DOES NOT shadow any other owner declarations
+    // Delegate to other declarations in the context of method
+    return merge(parameterDeclaration(name), lookupOwnerVariable(name));
+  }
+
+  // The scope of a local ownership variable declaration in a block
+  // is the rest of the block in which the declaration appears
+  eq Block.getStmt(int index).lookupOwnerVariable(String name) {
+    SimpleSet set = SimpleSet.emptySet;
+    VariableDeclaration v = localVariableDeclaration(name);
+    // declare before use and shadowing
+    SimpleSet above = lookupOwnerVariable(name);
+    if(v != null && declaredBeforeUse(v, index)) {
+      set = set.add(v);
+    }
+    return merge(set, above);
+  }
+
+  syn SimpleSet ASTNode.merge(SimpleSet s1, SimpleSet s2) {
+    SimpleSet set = SimpleSet.emptySet;
+    Iterator iter1 = s1.iterator();
+    while (iter1.hasNext()) {
+      set = set.add(iter1.next());
+    }
+    Iterator iter2 = s2.iterator();
+    while (iter2.hasNext()) {
+      set = set.add(iter2.next());
+    }
+    return set;
+  }
+
+  syn OwnerDeclaration TypeDecl._thisOwner() {
+    ThisOwner t = new ThisOwner();
+    t.setParent(this);
+    return t;
+  }
+
+  syn lazy OwnerDeclaration TypeDecl.thisOwner() = new BadOwnerVariable();
+  syn lazy OwnerDeclaration ClassDecl.thisOwner() = _thisOwner();
+  syn lazy OwnerDeclaration InterfaceDecl.thisOwner() = _thisOwner();
+
+  inh lazy OwnerDeclaration BodyDecl.lookupThisOwner();
+  inh OwnerDeclaration ThisOwner.lookupThisOwner();
+  inh OwnerDeclaration Expr.lookupThisOwner();
+  inh OwnerDeclaration ParameterDeclaration.lookupThisOwner();
+  inh OwnerDeclaration FieldDeclaration.lookupThisOwner();
+
+  eq Program.getChild().lookupThisOwner() = new BadOwnerVariable();
+  eq ClassDecl.getChild().lookupThisOwner() = thisOwner();
+  eq InterfaceDecl.getChild().lookupThisOwner() = thisOwner();
+
+}
+
+/**
+This aspect provides the implementation for the ownership
+parameter lookup from the particular places, using defined
+lookup* attributes
+*/
+aspect OwnerLookup {
+
+  BadOwnerVariable implements OwnerDeclaration;
+  syn String BadOwnerVariable.name() = "badOwner";
+
+  // Resolve ownership arguments
+  syn lazy OwnerDeclaration Owner.decl();
+
+  syn lazy SimpleSet ConcreteOwner.decls() {
+    if (hasQualifier()) {
+      TypeDecl ownerHost = getQualifier().type().original();
+      TypeDecl myType = getEnclosingTypeDecl();
+      if (ownerHost != null && myType != null && myType.isInnerTypeOf(ownerHost)) {
+        return ownerHost.ownerDeclaration(name());
+      }
+    }
+    return lookupOwnerVariable(name());
+  }
+  eq ConcreteOwner.decl() {
+    SimpleSet decls = decls();
+    if(decls.size() == 1) {
+      return (OwnerDeclaration)decls.iterator().next();
+    }
+    return new BadOwnerVariable();
+  }
+  eq World.decl() = world();
+  eq UnknownOwner.decl() = this;
+  eq DependentOwner.decl() = this;
+  eq FixedThis.decl() = this;
+  eq ThisOwner.decl() {
+    if (hasQualifier()) {
+      TypeDecl ownerHost = getQualifier().type().original();
+      TypeDecl myType = getEnclosingTypeDecl();
+      if (ownerHost != null && myType != null && myType.isInnerTypeOf(ownerHost)) {
+        return ownerHost.thisOwner();
+      }
+    } else {
+      return lookupThisOwner();
+    }
+    return new BadOwnerVariable();
+  }
+
+  syn TypeDecl ThisOwner.hostType() {
+    if (hasQualifier()) {
+      return getQualifier().type().original();
+    } else {
+      return getEnclosingTypeDecl();
+    }
+  }
+
+
+
+}

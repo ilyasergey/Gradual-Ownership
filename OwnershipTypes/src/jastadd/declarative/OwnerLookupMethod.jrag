@@ -1,0 +1,124 @@
+/*
+ * Refinement hack because of non-declarative aspects
+ * in the JastAddJ implementation
+ */
+aspect OwnerLookupMethod {
+
+  refine LookupMethod eq MethodAccess.decls() {
+    SimpleSet maxSpecific = maxSpecificWithOwners(lookupMethod(name()));
+    if(isQualified() ? qualifier().staticContextQualifier() : inStaticContext())
+      maxSpecific = removeInstanceMethods(maxSpecific);
+    return maxSpecific;
+  }
+
+  syn SimpleSet MethodAccess.maxSpecificWithOwners(Collection candidates) {
+    SimpleSet maxSpecific = SimpleSet.emptySet;
+    for(Iterator iter = candidates.iterator(); iter.hasNext(); ) {
+      MethodDecl decl = (MethodDecl)iter.next();
+      if(applicableWithOwners(decl) && accessible(decl)) {
+        if(maxSpecific.isEmpty())
+          maxSpecific = maxSpecific.add(decl);
+        else {
+          if(decl.moreSpecificThan((MethodDecl)maxSpecific.iterator().next()))
+            maxSpecific = SimpleSet.emptySet.add(decl);
+          else if(!((MethodDecl)maxSpecific.iterator().next()).moreSpecificThan(decl))
+            maxSpecific = maxSpecific.add(decl);
+        }
+      }
+    }
+    return maxSpecific;
+  }
+
+  syn boolean MethodAccess.applicableWithOwners(MethodDecl decl) {
+    if(getNumArg() != decl.getNumParameter())
+      return false;
+    if(!name().equals(decl.name()))
+      return false;
+    for(int i = 0; i < getNumArg(); i++) {
+      if(!getArg(i).type().instanceOf(mapType(decl.getParameter(i).type())))
+        return false;
+    }
+    return true;
+  }
+
+  syn lazy TypeDecl MethodAccess.mapType(TypeDecl t) {
+    TypeDecl qualType = qualType();
+    if (qualType instanceof OwnershipType) {
+      helpers.Substitution subst = ((OwnershipType) qualType).getSubstitution();
+      if (subst.isDefined("this")) {
+        subst = subst.update(qualType.original().thisOwner().name(), subst.apply("this"));
+      }
+      return t.map(subst);
+    } else {
+      return t;
+    }
+  }
+
+  inh lazy TypeDecl ASTNode.getEnclosingTypeDecl();
+  eq Program.getChild().getEnclosingTypeDecl() = null;
+  eq TypeDecl.getChild().getEnclosingTypeDecl() = this;
+
+  syn lazy TypeDecl MethodAccess.qualType() {
+    if (isQualified()) {
+      return qualifier().type();
+    }
+    TypeDecl original = getEnclosingTypeDecl();
+    if (original instanceof OwnerTypeDecl) {
+       return original.lookupOwnershipType(((OwnerTypeDecl)original).getSubstitution());
+    }
+    return original;
+  }
+
+  refine LookupMethod eq MethodDecl.signature() {
+      StringBuffer s = new StringBuffer();
+      s.append(name() + "(");
+      for(int i = 0; i < getNumParameter(); i++) {
+        if(i != 0) s.append(", ");
+        s.append(getParameter(i).type().original().typeName());
+      }
+      s.append(")");
+      return s.toString();
+  }
+
+ // more specific than
+ refine LookupMethod eq MethodDecl.moreSpecificThan(MethodDecl m) {
+    final TypeDecl self = this.getEnclosingType();
+    final TypeDecl other = m.getEnclosingType();
+
+    if (!(self instanceof OwnerTypeDecl) && !(self instanceof OwnerTypeDecl)) {
+      return LookupMethod.MethodDecl.moreSpecificThan(m);
+    }
+
+    if(getNumParameter() == 0)
+      return false;
+
+    if (self.conformsTo(other)) return true;
+    if (!self.instanceOf(other)) return false;
+    final TypeDecl lifted = self.up(other);
+    if (lifted == other) return true;
+
+    final Substitution subst = lifted.getSubstitution();
+
+    for(int i = 0; i < getNumParameter(); i++) {
+      final TypeDecl myType = getParameter(i).type();
+      final TypeDecl mapped = updateWithCurrentThis(m.getParameter(i).type().map(subst), lookupThisOwner());
+
+      if(myType.conformsTo(mapped))
+        return false;
+    }
+    return true;
+  }
+
+  inh TypeDecl BodyDecl.getEnclosingType();
+  eq TypeDecl.getBodyDecl().getEnclosingType() = this;
+
+  syn TypeDecl ASTNode.updateWithCurrentThis(TypeDecl t, OwnerDeclaration o) {
+    Substitution subst = t.getSubstitution();
+    Substitution s = Substitution.empty();
+    for (String name : subst.getDomain()) {
+      OwnerDeclaration od = subst.apply(name);
+      s = s.update(name, od.isThisOwner() ? o : od);
+    }
+    return t.original().lookupOwnershipType(s);
+  }
+}

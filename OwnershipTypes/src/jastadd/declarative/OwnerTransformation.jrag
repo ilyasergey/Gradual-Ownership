@@ -1,0 +1,1026 @@
+import java.util.Set;
+import java.util.HashSet;
+import java.util.Collection;
+import java.util.ArrayList;
+import helpers.*;;
+
+aspect Transformations {
+
+
+  syn lazy String TypeDecl.getOwnersPreamble() = "";
+
+  eq OwnerInterfaceDecl.getOwnersPreamble() {
+    StringBuffer buffer = new StringBuffer();
+    // dependent owners update method
+    buffer.append("\n  " + fullName() + " __updateDependent_" +
+                  fullName().replace(".", "_") + "(java.util.Map map, String position);");
+    // main owner method
+    buffer.append("\n  " + "Object __owner();");
+    // specific cast signatures
+    for (TypeDecl t : supersSorted()){
+      printCastSignature(t, buffer);
+    }
+
+    return buffer.toString();
+  }
+
+  eq OwnerClassDecl.getOwnersPreamble() {
+    StringBuffer s = new StringBuffer();
+    printOwnerFields(s);
+    printOwnerMethod(s);
+    for (TypeDecl t : supersSorted()){
+      if (!t.isAnonymous() && !t.isObject()) {
+        printUpdateMethod(t, s);
+        printCastMethod(t, s);
+      }
+    }
+    return s.toString() + super.getOwnersPreamble();
+  }
+
+  eq ClassDecl.getOwnersPreamble() {
+    StringBuffer s = new StringBuffer();
+    Iterator iter = fieldsIterator();
+    while (iter.hasNext()) {
+      FieldDeclaration field = (FieldDeclaration)iter.next();
+      printSafeUpdateMethod(field, s);
+    }
+    printBoundCheckMethod(s);
+    printHelpers(s);
+    return s.toString();
+  }
+
+  protected void ClassDecl.printHelpers(StringBuffer s) {
+     for (TypeDecl t : sorted(localCasts())) {
+       printCastHelper(t, s);
+     }
+     for (TypeDecl t : sorted(localUpdates())) {
+       printPutHelper(t, s);
+     }
+  }
+
+  protected void ClassDecl.printCastHelper(TypeDecl t, StringBuffer s) {
+     String prefix = t.fullName().replace(".", "_");
+     s.append("\n  private " + (!isInnerClass() ? " static " : "") + t.fullName() + " " + prefix + "_cast(");
+     s.append(t.fullName() + " _arg");
+     List<OwnerVariable> params = t.getOwnerParameterList();
+     if (params.size() > 0) { s.append(", "); }
+     s.append(t.paramsToString(params, "Object "));
+     s.append(") {");
+     if (params.size() == 0) {
+       s.append("\n    ").append("return _arg;");
+     } else {
+       s.append("\n    ").append("return _arg == null ? _arg : _arg.__castAs_" + prefix);
+       s.append("(").append(t.paramsToString(params, "")).append(");");
+     }
+     s.append("\n  }");
+  }
+
+  protected void ClassDecl.printPutHelper(TypeDecl t, StringBuffer s) {
+     String prefix = t.fullName().replace(".", "_");
+     s.append("\n  private " + (!isInnerClass() ? " static " : "") + t.fullName() + " " + prefix + "_put(").append(t.fullName() + " _arg, java.util.Map map, String position").append(") {");
+     s.append("\n    ").append("return _arg == null ? _arg : _arg.__updateDependent_" + prefix);
+     s.append("(map, position);");
+     s.append("\n  }");
+  }
+
+  protected void ClassDecl.printBoundCheckMethod(StringBuffer s) {
+    boolean flag = false;
+
+    // No need for this method if all fields are safe
+    Iterator iter = fieldsIterator();
+    while (iter.hasNext()) {
+      FieldDeclaration f = (FieldDeclaration)iter.next();
+      TypeDecl t = f.type();
+      if (t.owner().isUnknownOwner()) {
+        flag = true; break;
+      }
+    }
+    if (!flag) return;
+
+    String indent = "\n    ";
+    s.append("\n  private boolean __insideOwnerOf(Object o) throws java.lang.IllegalAccessException, java.lang.ClassNotFoundException, java.lang.reflect.InvocationTargetException {");
+    s.append(indent).append("java.lang.reflect.Method m;");
+    s.append(indent).append("try {m = o.getClass().getMethod(\"__owner\", new Class[0]);} catch (NoSuchMethodException e) {return true; /* o's owner is world (implicitly) */}");
+    s.append(indent).append("Object result = m.invoke(o, new Object[0]); // get o's owner");
+    s.append(indent).append("if (result == this) return true; // reflexivity");
+    s.append(indent).append("if (result.equals(\"WorldOwner\")) return true; // o's owner is world (explicitly)");
+    if (this instanceof OwnerClassDecl) {
+      s.append(indent).append("Object myOwner = this.__owner();  // my owner -- to check via transitivity");
+      s.append(indent).append("if (myOwner == result || myOwner == o) return true;");
+      s.append(indent).append("java.lang.reflect.Method m1;");
+      s.append(indent).append("try {m1 = myOwner.getClass().getMethod(\"__owner\", new Class[0]);} catch (NoSuchMethodException e) {return false; /* o's owner is not world, but this is world */} ");
+      s.append(indent).append("java.lang.reflect.Method insideOwner;");
+      s.append(indent).append("try {insideOwner = myOwner.getClass().getMethod(\"__insideOwnerOf\", new Class[]{Class.forName(\"java.lang.Object\")});} catch (NoSuchMethodException e) {return false;}");
+      s.append(indent).append("Object[] ownerArgs = new Object[]{result};");
+      s.append(indent).append("if (insideOwner != null) return ((Boolean)insideOwner.invoke(myOwner, ownerArgs)).booleanValue(); // transitivity");
+    }
+    s.append(indent).append("return false; // failed check");
+    s.append("\n  }");
+  }
+
+  ASTNode implements Comparable<ASTNode>;
+
+  syn int ASTNode.compareTo(ASTNode other) = toString().compareTo(other.toString());
+
+  syn lazy Collection<TypeDecl> TypeDecl.sorted(Collection<TypeDecl> c) {
+    java.util.List<TypeDecl> list = new ArrayList<TypeDecl>();
+    list.addAll(c);
+    java.util.Collections.sort(list);
+    return list;
+  }
+  syn lazy Collection<TypeDecl> TypeDecl.supersSorted() = sorted(supers());
+
+  protected String ASTNode.paramsToString(List<OwnerVariable> list, String eachPrefix) {
+    StringBuffer s = new StringBuffer();
+    if (list.size() > 0) {
+      s.append(eachPrefix).append(list.getChild(0).name());
+    }
+    for (int i = 1; i < list.size(); i++) {
+      s.append(", ").append(eachPrefix).append(list.getChild(i).name());
+    }
+    return s.toString();
+  }
+
+  protected void ClassDecl.printSafeUpdateMethod(FieldDeclaration f, StringBuffer s) {
+    TypeDecl t = f.type();
+    if (!t.owner().isUnknownOwner()) return;
+
+    TypeDecl original = t.original();
+    List<OwnerVariable> params = original.getOwnerParameterList();
+    Substitution subst = t.getSubstitution();
+    s.append("\n  public " + original.fullName() + " __safeUpdate_"+ f.name() + "("+ original.fullName() +" o) {");
+    String indent = "\n    ";
+    s.append(indent + "if (o == null) return o; ");
+    s.append(indent + "boolean result;");
+    s.append(indent + "try { result = this.__insideOwnerOf(o); } catch (Exception e) {throw new Error(\"Unexpected error in the method __insideOwnerOf()\");}");
+    s.append(indent + "if (result) return (this." + f.name() + " = o); else throw new Error(\"Ownership invariant violation\");");
+    s.append("\n  }");
+  }
+
+
+  protected void OwnerInterfaceDecl.printCastSignature(TypeDecl t, StringBuffer s) {
+    TypeDecl original = t.original();
+    String name = original.fullName().replace(".", "_");
+    List<OwnerVariable> params = original.getOwnerParameterList();
+    Substitution subst = t.getSubstitution();
+    s.append("\n  " + original.fullName() + " __castAs_"+ name +"(");
+    s.append(paramsToString(params, "Object "));
+    s.append(");");
+  }
+
+  protected void ClassDecl.printCastMethod(TypeDecl t, StringBuffer s) {
+    TypeDecl original = t.original();
+    String name = original.fullName().replace(".", "_");
+    List<OwnerVariable> params = original.getOwnerParameterList();
+    Substitution subst = t.getSubstitution();
+    s.append("\n  " + "public " + original.fullName() + " __castAs_"+ name +"(");
+    s.append(paramsToString(params, "Object "));
+    s.append(") {");
+    for (OwnerVariable p : params) {
+      OwnerDeclaration decl = subst.apply(p.name()); // declaration inside this owner
+      String init;
+      if (decl.isWorld()) {init = "new Object(){public String toString() { return \"WorldOwner\"; }}";}
+      else if (decl.isThisOwner()) {init = decl.asObject();}
+      else {init = decl.asObject(); }
+
+      s.append("\n    final Object _" + p.name() + " = " + init + ";");
+      s.append("\n    " + "if (" + "_" + p.name() + ".equals(\"WorldOwner\")" + " && " +
+               p.name() + ".equals(\"WorldOwner\")) { /* it's ok */}");
+      s.append("\n    " + " else if (" + p.name() + ".equals(\"UnknownOwner\")) { /* it's ok */}");
+      s.append("\n    " + " else if (" + p.name() + " != " + "_" + p.name() +
+               ") { throw new Error(\"Owner parameter equality error\") ;}");
+    }
+    s.append("\n    return this;\n  }");
+  }
+
+  protected void ClassDecl.printUpdateMethod(TypeDecl t, StringBuffer s) {
+    TypeDecl original = t.original();
+    String name = original.fullName().replace(".", "_");
+    List<OwnerVariable> params = original.getOwnerParameterList();
+    Substitution subst = t.getSubstitution();
+    s.append("\n  " + "public " + original.fullName() + " __updateDependent_"+ name + "(java.util.Map map, String position) {");
+    for (OwnerVariable p : params) {
+      OwnerDeclaration decl = subst.apply(p.name()); // declaration inside this owner
+      String init;
+      if (decl.isWorld()) {init = "\"WorldOwner\"";}
+      else if (decl.isThisOwner()) {init = decl.asObject();}
+      else {init = decl.asObject(); }
+      s.append("\n    map.put(\"dep_\" + position + \"_\" + \"" + fullName().replace(".","_") + "\" + \"_" +
+                      p.name() + "\", "+  init +");");
+    }
+    s.append("\n    map.put(\"fixedThis_\" + position, this);");
+    s.append("\n    return this;\n  }");
+  }
+
+
+
+  protected void ClassDecl.printOwnerFields(StringBuffer s) {
+    for (int i = 0; i < getNumOwnerParameter(); i ++) {
+      OwnerDeclaration od = getOwnerParameter(i);
+      s.append("\n  " + "final private Object ").append(od.name()).append(";");
+    }
+  }
+
+  protected void ClassDecl.printOwnerMethod(StringBuffer s) {
+    s.append("\n  " + "public Object __owner(){ return "+ owner().asObject() + ";} ");
+  }
+
+  inh lazy String BodyDecl.classParameterString();
+  eq TypeDecl.getBodyDecl().classParameterString() = "";
+  eq OwnerClassDecl.getBodyDecl().classParameterString() = ownerParameterString();
+  eq OwnerInterfaceDecl.getBodyDecl().classParameterString() = ownerParameterString();
+
+  inh lazy List<OwnerVariable> ConstructorDecl.classParameterList();
+  eq TypeDecl.getBodyDecl().classParameterList() = new List<OwnerVariable>();
+  eq OwnerClassDecl.getBodyDecl().classParameterList() = getOwnerParameterList();
+
+  protected String TypeDecl.ownerParameterString() {
+    StringBuffer buffer = new StringBuffer();
+    // dynamic cast method
+    if (getNumOwnerParameter() > 0) {
+      buffer.append("Object ").append(getOwnerParameter(0).name());
+      for (int i = 1; i < getNumOwnerParameter(); i++) {
+        buffer.append(", ").append("Object ").append(getOwnerParameter(i).name());
+      }
+    }
+    return buffer.toString();
+  }
+
+  // Arguments for `this'-constructor
+  inh lazy String Stmt.getOwnershipParamString();
+  inh lazy String Expr.getOwnershipParamString();
+  eq Program.getChild().getOwnershipParamString() = "";
+  eq ConstructorDecl.getConstructorInvocation().getOwnershipParamString() = paramsToString(classParameterList(), "");
+  eq ExprStmt.getExpr().getOwnershipParamString() = getOwnershipParamString();
+
+  inh lazy String Stmt.getSuperOwnershipParamString();
+  inh lazy String Expr.getSuperOwnershipParamString();
+  inh lazy String BodyDecl.getSuperOwnershipParamString();
+
+  eq Program.getChild().getSuperOwnershipParamString() = "";
+  eq OwnerClassDecl.getBodyDecl().getSuperOwnershipParamString() {
+    if (!hasSuperClassAccess()) return "";
+    Access superAccess = getSuperClassAccess();
+    TypeDecl superType = superAccess.type();
+    if (superType instanceof OwnershipType) {
+      OwnershipType ot = (OwnershipType) superType;
+      java.util.ArrayList<OwnerDeclaration> list = ot.argsAsList();
+      StringBuffer s = new StringBuffer();
+      if (list.size() > 0) {
+        OwnerDeclaration od = list.get(0);
+        if (od instanceof OwnerVariable) {
+          s.append(od.name());
+        } else {
+          s.append(od.asObject());
+        }
+      }
+      for (int i = 1; i < list.size(); i++) {
+        OwnerDeclaration od = list.get(i);
+        if (od instanceof OwnerVariable) {
+          s.append(od.name());
+        } else {
+          s.append(", ").append(od.asObject());
+        }
+      }
+      return s.toString();
+    }
+    return "";
+  }
+  eq ConstructorDecl.getConstructorInvocation().getSuperOwnershipParamString() = getSuperOwnershipParamString();
+  eq ExprStmt.getExpr().getSuperOwnershipParamString() = getSuperOwnershipParamString();
+}
+
+
+////////////////////////////////////
+
+
+aspect PrettyPrintWithoutOwners {
+  
+  // Administrative transform
+  public String ASTNode.toStringTransform() {
+    StringBuffer s = new StringBuffer();
+    toStringTransform(s);
+    return s.toString().trim();
+  }
+
+  public void ASTNode.toStringTransform(StringBuffer s) {
+    toString(s);
+  }
+
+  public void Program.toStringTransform(StringBuffer s) {
+    for(Iterator iter = compilationUnitIterator(); iter.hasNext(); ) {
+      CompilationUnit cu = (CompilationUnit)iter.next();
+      if(cu.fromSource()) {
+        cu.toStringTransform(s);
+      }
+    }
+  }
+
+  public void CompilationUnit.toStringTransform(StringBuffer s) {
+    try {
+      if(!getPackageDecl().equals("")) {
+        s.append("package " + getPackageDecl() + ";\n");
+      }
+      for(int i = 0; i < getNumImportDecl(); i++) {
+        getImportDecl(i).toString(s);
+      }
+      for(int i = 0; i < getNumTypeDecl(); i++) {
+        getTypeDecl(i).toStringTransform(s);
+        s.append("\n");
+      }
+    } catch (NullPointerException e) {
+      System.out.print("Error in compilation unit hosting " + getTypeDecl(0).typeName());
+      throw e;
+    }
+  }
+
+  protected void TypeDecl.ppBodyDeclsTransform(StringBuffer s) {
+    s.append(" {");
+
+    // Owners preamble
+    s.append(getOwnersPreamble());
+
+    for(int i=0; i < getNumBodyDecl(); i++) {
+      getBodyDecl(i).toStringTransform(s);
+    }
+    s.append(indent() + "}");
+  }
+
+  public void ClassDecl.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    getModifiers().toString(s);
+    s.append("class " + name());
+    if(hasSuperClassAccess()) {
+      s.append(" extends ");
+      getSuperClassAccess().toStringTransform(s);
+    }
+    if(getNumImplements() > 0) {
+      s.append(" implements ");
+      getImplements(0).toStringTransform(s);
+      for(int i = 1; i < getNumImplements(); i++) {
+        s.append(", ");
+        getImplements(i).toStringTransform(s);
+      }
+    }
+    ppBodyDeclsTransform(s);
+  }
+
+  public void InterfaceDecl.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    getModifiers().toString(s);
+    s.append("interface " + name());
+    if(getNumSuperInterfaceId() > 0) {
+      s.append(" extends ");
+      getSuperInterfaceId(0).toStringTransform(s);
+      for(int i = 1; i < getNumSuperInterfaceId(); i++) {
+        s.append(", ");
+        getSuperInterfaceId(i).toStringTransform(s);
+      }
+    }
+    ppBodyDeclsTransform(s);
+  }
+
+  // Type body decl
+
+  public void InstanceInitializer.toStringTransform(StringBuffer s) {
+    if(getBlock().getNumStmt() > 0) {
+      s.append(indent());
+      getBlock().toStringTransform(s);
+    }
+  }
+
+  public void StaticInitializer.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    s.append("static ");
+    getBlock().toStringTransform(s);
+  }
+
+  syn lazy boolean ConstructorDecl.hasThisCall() {
+    if (!hasConstructorInvocation()) return false;
+    Stmt stmt = getConstructorInvocation();
+    return stmt instanceof ExprStmt &&
+           ((ExprStmt) stmt).getExpr() instanceof ConstructorAccess &&
+           !(((ExprStmt) stmt).getExpr() instanceof SuperConstructorAccess);
+  }
+
+  public void ConstructorDecl.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    getModifiers().toString(s);
+    s.append(name() + "(");
+    if(getNumParameter() > 0) {
+      String str = classParameterString();
+      if (str.length() > 0) {
+        s.append(classParameterString()).append(", ");
+      }
+      getParameter(0).toStringTransform(s);
+      for(int i = 1; i < getNumParameter(); i++) {
+        s.append(", ");
+        getParameter(i).toStringTransform(s);
+      }
+    } else {
+      s.append(classParameterString());
+    }
+    s.append(")");
+    if(getNumException() > 0) {
+      s.append(" throws ");
+      getException(0).toString(s);
+      for(int i = 1; i < getNumException(); i++) {
+        s.append(", ");
+        getException(i).toString(s);
+      }
+    }
+
+    s.append(" {");
+    if(hasConstructorInvocation()) {
+      getConstructorInvocation().toStringTransform(s);
+    }
+    if (!hasThisCall()){
+    // ownership parameter initialization
+      for (OwnerDeclaration od: classParameterList()) {
+        s.append("\n    ").append("this." + od.name() + " = " + od.name() + ";");
+      }
+    }
+    for(int i = 0; i < getBlock().getNumStmt(); i++) {
+      getBlock().getStmt(i).toStringTransform(s);
+    }
+    s.append(indent()).append("}");
+  }
+
+  public void FieldDeclaration.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    getModifiers().toString(s);
+    getTypeAccess().toStringTransform(s);
+    s.append(" " + name());
+    if(hasInit()) {
+      s.append(" = ");
+      getInit().toStringTransform(s);
+    }
+    s.append(";");
+  }
+
+  public void VariableDeclaration.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    getModifiers().toString(s);
+    getTypeAccess().toStringTransform(s);
+    s.append(" " + name());
+    if(hasInit()) {
+      s.append(" = ");
+      getInit().toStringTransform(s);
+    }
+    s.append(";");
+  }
+
+  public void MethodDecl.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    getModifiers().toString(s);
+    getTypeAccess().toStringTransform(s);
+    s.append(" " + name() + "(");
+    if(getNumParameter() > 0) {
+      getParameter(0).toStringTransform(s);
+      for(int i = 1; i < getNumParameter(); i++) {
+        s.append(", ");
+        getParameter(i).toStringTransform(s);
+      }
+    }
+    s.append(")");
+    if(getNumException() > 0) {
+      s.append(" throws ");
+      getException(0).toString(s);
+      for(int i = 1; i < getNumException(); i++) {
+        s.append(", ");
+        getException(i).toString(s);
+      }
+    }
+    if(hasBlock()) {
+      s.append(" ");
+      getBlock().toStringTransform(s);
+    }
+    else {
+      s.append(";");
+    }
+  }
+
+  public void MemberClassDecl.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    getClassDecl().toStringTransform(s);
+  }
+
+  public void MemberInterfaceDecl.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    getInterfaceDecl().toStringTransform(s);
+  }
+
+  public void ArrayInit.toStringTransform(StringBuffer s) {
+    s.append("{ ");
+    if(getNumInit() > 0) {
+      getInit(0).toStringTransform(s);
+      for(int i = 1; i < getNumInit(); i++) {
+        s.append(", ");
+        getInit(i).toStringTransform(s);
+      }
+    }
+    s.append(" } ");
+  }
+
+  public void ParameterDeclaration.toStringTransform(StringBuffer s) {
+    getModifiers().toString(s);
+    getTypeAccess().toStringTransform(s);
+    s.append(" " + name());
+  }
+
+  // Assign Expression
+
+  syn String AbstractDot.stringQualifier() {
+    Access right = getRight();
+    if (right != null && right.isQualified() && right instanceof AbstractDot) {
+      return getLeft().toStringTransform() + "." + ((AbstractDot) right).stringQualifier();
+    } else {
+      return getLeft().toStringTransform();
+    }
+  }
+
+  public void AssignExpr.toStringTransform(StringBuffer s1) {
+    StringBuffer s = new StringBuffer();
+
+    Expr dest = getDest();
+    Expr source = getSource();
+    Variable f = destAsVar();
+    if (notSpecified() && f instanceof FieldDeclaration && dest instanceof Access) {
+      String qual = dest instanceof AbstractDot ? ((AbstractDot) dest).stringQualifier() : "this";
+      s.append(qual + ".__safeUpdate_" + f.name() + "(");
+      source.toStringTransform(s);
+      s.append(")");
+    } else {
+      dest.toStringTransform(s);
+      s.append(printOp());
+      source.toStringTransform(s);
+    }
+
+    s1.append(printWithChecks(s.toString()));
+  }
+
+  public void ParExpr.toStringTransform(StringBuffer s1) {
+    StringBuffer s = new StringBuffer();
+
+    s.append("(");
+    getExpr().toStringTransform(s);
+    s.append(")");
+
+    s1.append(printWithChecks(s.toString()));
+  }
+
+  syn lazy java.util.ArrayList<OwnerDeclaration> ClassInstanceExpr.getOwnershipArgs() {
+    java.util.ArrayList<OwnerDeclaration> list = new java.util.ArrayList<OwnerDeclaration>();
+    if (getAccess() instanceof OwnTypeAccess) {
+      OwnTypeAccess access = (OwnTypeAccess) getAccess();
+      if (!(access.type() instanceof InterfaceDecl)) {
+        for (Owner o : access.getOwnerArgumentList()) {
+          list.add(o.decl());
+        }
+      }
+    }
+    return list;
+  }
+
+  public void ClassInstanceExpr.toStringTransform(StringBuffer s1) {
+    StringBuffer s = new StringBuffer();
+
+    s.append("new ");
+    getAccess().toStringTransform(s);
+    s.append("(");
+    java.util.ArrayList<OwnerDeclaration> list = getOwnershipArgs();
+    if (list.size() > 0) {
+      s.append(list.get(0).asObject());
+      for(int i = 1; i < list.size(); i++) {
+        s.append(", ").append(list.get(i).asObject());
+      }
+      if(getNumArg() > 0) { s.append(", "); }
+    }
+    if(getNumArg() > 0) {
+      getArg(0).toStringTransform(s);
+      for(int i = 1; i < getNumArg(); i++) {
+        s.append(", ");
+        getArg(i).toStringTransform(s);
+      }
+    }
+    s.append(")");
+
+    if(hasTypeDecl()) {
+      TypeDecl decl = getTypeDecl();
+      s.append(" {");
+
+      TypeDecl t = getAccess().type().original();
+      if (t instanceof InterfaceDecl) {
+        s.append(type().getOwnersPreamble());
+      }
+
+      for(int i = 0; i < decl.getNumBodyDecl(); i++) {
+        if(!(decl.getBodyDecl(i) instanceof ConstructorDecl))
+          decl.getBodyDecl(i).toStringTransform(s);
+      }
+      s.append(typeDeclIndent());
+      s.append("}");
+    }
+
+    s1.append(printWithChecks(s.toString()));
+  }
+
+  public void ArrayCreationExpr.toStringTransform(StringBuffer s) {
+    s.append("new ");
+    getTypeAccess().toStringTransform(s);
+    if(hasArrayInit()) {
+      getArrayInit().toStringTransform(s);
+    }
+  }
+
+  // Pre and post operations for unary expression
+
+  public void Unary.toStringTransform(StringBuffer s) {
+    s.append(printPreOp());
+    getOperand().toStringTransform(s);
+    s.append(printPostOp());
+  }
+
+  public void CastExpr.toStringTransform(StringBuffer s1) {
+    StringBuffer s = new StringBuffer();
+
+    s.append("(");
+    getTypeAccess().toStringTransform(s);
+    s.append(")");
+    getExpr().toStringTransform(s);
+
+    s1.append(printWithChecks(s.toString()));
+  }
+
+  // Binary Expr
+
+  public void Binary.toStringTransform(StringBuffer s) {
+    getLeftOperand().toStringTransform(s);
+    s.append(printOp());
+    getRightOperand().toStringTransform(s);
+  }
+
+  public void InstanceOfExpr.toStringTransform(StringBuffer s) {
+    getExpr().toStringTransform(s);
+    s.append(" instanceof ");
+    getTypeAccess().toStringTransform(s);
+  }
+
+  public void ConditionalExpr.toStringTransform(StringBuffer s1) {
+    StringBuffer s = new StringBuffer();
+
+    getCondition().toStringTransform(s);
+    s.append(" ? ");
+    getTrueExpr().toStringTransform(s);
+    s.append(" : ");
+    getFalseExpr().toStringTransform(s);
+
+    s1.append(printWithChecks(s.toString()));
+  }
+
+  public void AbstractDot.toStringTransform(StringBuffer s1) {
+    StringBuffer s = new StringBuffer();
+    Expr left = getLeft();
+    left.toStringTransform(s);
+    if (left.needsTreatment()) {
+      s.append(left.appendPut());
+      s.append(left.appendCast());
+    }
+
+    if(!nextAccess().isArrayAccess())
+      s.append(".");
+    getRight().toStringTransform(s);
+
+    s1.append(printWithChecks(s.toString()));
+  }
+
+  public void MethodAccess.toStringTransform(StringBuffer s1) {
+    StringBuffer s = new StringBuffer();
+
+    s.append(name());
+    s.append("(");
+    if(getNumArg() > 0) {
+      getArg(0).toStringTransform(s);
+      for(int i = 1; i < getNumArg(); i++) {
+        s.append(", ");
+        getArg(i).toStringTransform(s);
+      }
+    }
+    s.append(")");
+    if (!isQualified() && !isLeftSideOfDot()) {
+      s1.append(printWithChecks(s.toString()));
+    } else {
+      s1.append(s.toString());
+    }
+  }
+
+  public void VarAccess.toStringTransform(StringBuffer s1) {
+    if (!isQualified() && !isLeftSideOfDot()) {
+      s1.append(printWithChecks(toString()));
+    } else {
+      s1.append(toString());
+    }
+  }
+
+
+  public void ConstructorAccess.toStringTransform(StringBuffer s) {
+    s.append(name());
+    s.append("(");
+    String oParams = getOwnershipParamString();
+    if (oParams.length() > 0) {
+     s.append(oParams);
+     if (getNumArg() > 0) {
+       s.append(", ");
+     }
+    }
+    if(getNumArg() > 0) {
+      getArg(0).toStringTransform(s);
+      for(int i = 1; i < getNumArg(); i++) {
+        s.append(", ");
+        getArg(i).toStringTransform(s);
+      }
+    }
+    s.append(")");
+  }
+
+  public void SuperConstructorAccess.toStringTransform(StringBuffer s) {
+    s.append(name());
+    s.append("(");
+    String oParams = getSuperOwnershipParamString();
+    if (oParams.length() > 0) {
+     s.append(oParams);
+     if (getNumArg() > 0) {
+       s.append(", ");
+     }
+    }
+    if(getNumArg() > 0) {
+      getArg(0).toStringTransform(s);
+      for(int i = 1; i < getNumArg(); i++) {
+        s.append(", ");
+        getArg(i).toStringTransform(s);
+      }
+    }
+    s.append(")");
+  }
+
+  public void TypeAccess.toStringTransform(StringBuffer s) {
+    if(decl().isReferenceType())
+      s.append(nameWithPackage());
+    else
+      s.append(decl().name());
+  }
+
+  public void OwnTypeAccess.toStringTransform(StringBuffer s) {
+    getTypeAccess().toStringTransform(s);
+  }
+
+  public void OwnershipClassType.toStringTransform(StringBuffer s) {
+    s.append(getInner().fullName());
+  }
+
+  public void OwnershipInterfaceType.toStringTransform(StringBuffer s) {
+    s.append(getInner().fullName());
+  }
+
+  public void ArrayTypeAccess.toStringTransform(StringBuffer s) {
+    getAccess().toStringTransform(s);
+    s.append("[]");
+  }
+
+  public void ArrayTypeWithSizeAccess.toStringTransform(StringBuffer s) {
+    getAccess().toStringTransform(s);
+    s.append("[");
+    getExpr().toStringTransform(s);
+    s.append("]");
+  }
+
+  public void ArrayAccess.toStringTransform(StringBuffer s) {
+    s.append("[");
+    getExpr().toStringTransform(s);
+    s.append("]");
+  }
+
+  // Stmts
+
+  public void Block.toStringTransform(StringBuffer s) {
+    String indent = indent();
+    s.append(shouldHaveIndent() ? indent : "");
+    s.append("{");
+    ASTNode parent = getParent();
+    if (parent != null && parent.getParent() instanceof MethodDecl) {
+      java.util.Collection<OwnerDeclaration> used = ((MethodDecl) parent.getParent()).localUsedDependentOwners();
+      if (used.size() > 0) {
+        s.append(indent());
+        s.append("final java.util.Map _depMap = new java.util.HashMap();");
+      }
+    }
+    for(int i = 0; i < getNumStmt(); i++) {
+      getStmt(i).toStringTransform(s);
+    }
+    s.append(shouldHaveIndent() ? indent : indent.substring(0, indent.length()-2));
+    s.append("}");
+  }
+
+  public void LabeledStmt.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    s.append(getLabel() + ":");
+    getStmt().toStringTransform(s);
+  }
+
+  public void ExprStmt.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    getExpr().toStringTransform(s);
+    s.append(";");
+  }
+
+  public void SwitchStmt.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    s.append("switch (");
+    getExpr().toStringTransform(s);
+    s.append(")");
+    getBlock().toStringTransform(s);
+  }
+
+  public void ConstCase.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    s.append("case ");
+    getValue().toStringTransform(s);
+    s.append(":");
+  }
+
+  public void DefaultCase.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    s.append("default:");
+  }
+
+  public void IfStmt.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    s.append("if(");
+    getCondition().toStringTransform(s);
+    s.append(") ");
+    getThen().toStringTransform(s);
+    if(hasElse()) {
+      s.append(indent());
+      s.append("else ");
+      getElse().toStringTransform(s);
+    }
+  }
+
+  public void WhileStmt.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    s.append("while(");
+    getCondition().toStringTransform(s);
+    s.append(")");
+    getStmt().toStringTransform(s);
+  }
+
+  public void DoStmt.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    s.append("do ");
+    getStmt().toStringTransform(s);
+    s.append("while(");
+    getCondition().toStringTransform(s);
+    s.append(");");
+  }
+
+  public void ForStmt.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    s.append("for(");
+    if(getNumInitStmt() > 0) {
+      if(getInitStmt(0) instanceof VariableDeclaration) {
+        int minDimension = Integer.MAX_VALUE;
+        for(int i = 0; i < getNumInitStmt(); i++) {
+          VariableDeclaration v = (VariableDeclaration)getInitStmt(i);
+          minDimension = Math.min(minDimension, v.type().dimension());
+        }
+        VariableDeclaration v = (VariableDeclaration)getInitStmt(0);
+        v.getModifiers().toStringTransform(s);
+        s.append(v.type().original().elementType().typeName());
+        for(int i = minDimension; i > 0; i--)
+          s.append("[]");
+
+        for(int i = 0; i < getNumInitStmt(); i++) {
+          if(i != 0)
+            s.append(",");
+          v = (VariableDeclaration)getInitStmt(i);
+          s.append(" " + v.name());
+          for(int j = v.type().dimension() - minDimension; j > 0; j--)
+            s.append("[]");
+          if(v.hasInit()) {
+            s.append(" = ");
+            v.getInit().toStringTransform(s);
+          }
+        }
+      }
+      else if(getInitStmt(0) instanceof ExprStmt) {
+        ExprStmt stmt = (ExprStmt)getInitStmt(0);
+        stmt.getExpr().toStringTransform(s);
+        for(int i = 1; i < getNumInitStmt(); i++) {
+          s.append(", ");
+          stmt = (ExprStmt)getInitStmt(i);
+          stmt.getExpr().toStringTransform(s);
+        }
+      }
+      else {
+        throw new Error("Unexpected initializer in for loop: " + getInitStmt(0));
+      }
+    }
+
+    s.append("; ");
+    if(hasCondition()) {
+      getCondition().toStringTransform(s);
+    }
+    s.append("; ");
+
+    if(getNumUpdateStmt() > 0) {
+      ExprStmt stmt = (ExprStmt)getUpdateStmt(0);
+      stmt.getExpr().toStringTransform(s);
+      for(int i = 1; i < getNumUpdateStmt(); i++) {
+        s.append(", ");
+        stmt = (ExprStmt)getUpdateStmt(i);
+        stmt.getExpr().toStringTransform(s);
+      }
+    }
+
+    s.append(") ");
+    getStmt().toStringTransform(s);
+  }
+
+  public void BreakStmt.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    s.append("break ");
+    if(hasLabel())
+      s.append(getLabel());
+    s.append(";");
+  }
+
+  public void ContinueStmt.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    s.append("continue ");
+    if(hasLabel())
+      s.append(getLabel());
+    s.append(";");
+  }
+
+  public void ReturnStmt.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    s.append("return ");
+    if(hasResult()) {
+      getResult().toStringTransform(s);
+    }
+    s.append(";");
+  }
+
+  public void ThrowStmt.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    s.append("throw ");
+    getExpr().toStringTransform(s);
+    s.append(";");
+  }
+
+  public void SynchronizedStmt.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    s.append("synchronized(");
+    getExpr().toStringTransform(s);
+    s.append(") ");
+    getBlock().toStringTransform(s);
+  }
+
+  public void TryStmt.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    s.append("try ");
+    getBlock().toStringTransform(s);
+    for(int i = 0; i < getNumCatchClause(); i++) {
+      s.append(indent());
+      getCatchClause(i).toStringTransform(s);
+    }
+    if(hasFinally()) {
+      s.append(indent());
+      s.append("finally ");
+      getFinally().toStringTransform(s);
+    }
+  }
+
+  public void CatchClause.toStringTransform(StringBuffer s) {
+    s.append("catch (");
+    getParameter().toStringTransform(s);
+    s.append(") ");
+    getBlock().toStringTransform(s);
+  }
+
+  public void AssertStmt.toStringTransform(StringBuffer s) {
+    s.append(indent());
+    s.append("assert ");
+    getfirst().toStringTransform(s);
+    if(hasExpr()) {
+      s.append(" : ");
+      getExpr().toStringTransform(s);
+    }
+    s.append(";");
+  }
+
+  public void LocalClassDeclStmt.toStringTransform(StringBuffer s) {
+    getClassDecl().toStringTransform(s);
+  }
+
+}

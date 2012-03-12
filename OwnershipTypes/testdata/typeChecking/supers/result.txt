@@ -1,0 +1,23 @@
+class A/*<, T, O>*/ {
+  A() {
+    super();
+  }
+}
+
+class B/*<, S, U, K>*/ extends A/*<S, K, >*/ {
+  B() {
+    super();
+  }
+}
+
+class C/*<, V, P>*/ extends B/*<V, world, P, >*/ {
+  C() {
+    super();
+  }
+}
+
+class D/*<, owner, owner2>*/ extends C/*<owner, owner2, >*/ {
+  D() {
+    super();
+  }
+}

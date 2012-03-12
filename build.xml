@@ -1,0 +1,256 @@
+<project name="OwnershipTypes" default="build">
+
+  <property name="base.dir" value="."/>
+  <property name="project.dir" value="${base.dir}/OwnershipTypes"/>
+
+  <!-- location of Java1.4Frontend -->
+  <property name="Java1.4Frontend" value="${base.dir}/Java1.4Frontend"/>
+  <!-- location of Java1.4Backend -->
+  <property name="Java1.4Backend" value="$${base.dir}/Java1.4Backend"/>
+
+  <!-- "package" is the directory where generated files will be stored -->
+
+  <property name="src" value="${project.dir}/src"/>
+
+  <property name="package" value="AST"/>
+  <property name="scanner.dir" value="${src}/scanner"/>
+  <property name="parser.dir" value="${src}/parser"/>
+  <property name="jastadd.dir" value="${src}/jastadd"/>
+  <property name="test.src" value="${project.dir}/test"/>
+
+  <property name="classes" value="${project.dir}/classes"/>
+  <property name="dest" value="${classes}/production"/>
+  <property name="test.dest" value="${classes}/test"/>
+
+  <!-- "tools" is the directory where generators and libraries are located. -->
+  <path id="project.classpath">
+    <fileset dir="${project.dir}/tools">
+      <include name="**/*.jar"/>
+      <exclude name="JastAddParser.jar"/>
+    </fileset>
+  </path>
+
+
+  <property name="tools" value="${project.dir}/tools"/>
+
+  <!-- "jflex" is an ant task class for the scanner generator in JFlex.jar -->
+  <taskdef name="jflex" classname="JFlex.anttask.JFlexTask" classpathref="project.classpath"/>
+  <!-- "beaver" is an ant task class for the parser generator in beaver.jar -->
+  <taskdef name="beaver" classname="beaver.comp.run.AntTask" classpathref="project.classpath"/>
+  <!-- "jastadd" is an ant task class in jastadd2.jar -->
+  <taskdef name="jastadd" classname="jastadd.JastAddTask" classpathref="project.classpath"/>
+
+  <!-- Recompile source -->
+  <target name="rebuild.all" depends="clean, build, jar"/>
+
+  <!-- compile sources -->
+  <target name="build" depends="gen">
+    <mkdir dir="${dest}"/>
+
+    <javac debug="true"
+           nowarn="true"
+           srcdir="${src}"
+           destdir="${dest}"
+           includes="**/*.java"
+           excludes="test/**">
+      <classpath refid="project.classpath"/>
+    </javac>
+  </target>
+
+  <!-- generate compiler source files and compile sources -->
+  <target name="gen" depends="scanner,parser" description="Generate Java files for ownership types">
+    <!-- create AST node types and weave aspect modules -->
+    <jastadd package="${package}" rewrite="true" beaver="true" novisitcheck="true" noCacheCycle="true"
+             outdir="${src}">
+      <fileset dir="${Java1.4Frontend}">
+        <include name="**/*.jrag"/>
+        <include name="**/*.jadd"/>
+      </fileset>
+      <fileset dir="${jastadd.dir}">
+        <include name="**/*.ast"/>
+        <include name="**/*.jrag"/>
+        <include name="**/*.jadd"/>
+      </fileset>
+    </jastadd>
+  </target>
+
+  <target name="scanner">
+    <!-- compose the scanner -->
+    <concat destfile="${scanner.dir}/JavaScanner.flex" binary="true" force="false">
+      <!-- Original Java tokens -->
+      <filelist dir="${scanner.dir}">
+        <file name="preamble.flex"/>
+        <file name="macros.flex"/>
+        <file name="rules_preamble.flex"/>
+        <file name="WhiteSpace.flex"/>
+        <!-- Gradual Ownership tokens -->
+        <file name="owners.flex"/>
+        <file name="Comments.flex"/>
+        <file name="Keywords.flex"/>
+        <file name="Literals.flex"/>
+        <file name="Separators.flex"/>
+        <file name="Operators.flex"/>
+        <file name="Identifiers.flex"/>
+        <file name="postamble.flex"/>
+      </filelist>
+    </concat>
+    <!-- generate the scanner -->
+    <jflex file="${scanner.dir}/JavaScanner.flex" outdir="${scanner.dir}" nobak="yes"/>
+  </target>
+
+  <target name="parser">
+    <!-- generate the parser phase 1, create a full .lalr specification from fragments-->
+    <concat destfile="${parser.dir}/JavaParser.all" binary="true" force="false">
+      <filelist dir="${parser.dir}">
+        <file name="preamble.parser"/>
+        <file name="java14.parser"/>
+        <file name="errorrecovery.parser"/>
+        <file name="owners.parser"/>
+      </filelist>
+    </concat>
+    <!-- generate the parser phase 2, translating .lalr to .beaver -->
+    <java classpath="${tools}/JastAddParser.jar:${tools}/beaver-rt.jar" classname="Main" fork="true">
+      <arg line="${parser.dir}/JavaParser.all ${parser.dir}/JavaParser.beaver"/>
+    </java>
+    <!-- generate the parser phase 3, translating .beaver to .java -->
+    <beaver file="${parser.dir}/JavaParser.beaver" terminalNames="yes" compress="yes" useSwitch="no"/>
+  </target>
+
+  <!-- remove generated source files and .class files -->
+  <target name="clean" depends="cleanGen">
+    <!-- delete all .class files recursively -->
+    <delete dir="${classes}"/>
+    <delete file="OwnershipTypes/OwnershipChecker.jar"/>
+  </target>
+
+  <!-- remove generated source files and .class files -->
+  <target name="cleanGen">
+    <delete dir="${package}"/>
+    <delete dir="${dest}"/>
+    <delete>
+      <fileset dir="${scanner.dir}" includes="JavaScanner.flex"/>
+      <fileset dir="${scanner.dir}" includes="JavaScanner.java"/>
+      <fileset dir="${parser.dir}" includes="JavaParser.java"/>
+      <fileset dir="${parser.dir}" includes="JavaParser.beaver"/>
+      <fileset dir="${parser.dir}" includes="JavaParser.all"/>
+    </delete>
+  </target>
+
+  <!-- build binaries -->
+  <target name="jar" depends="build">
+    <mkdir dir="${dest}"/>
+    <jar destfile="${base.dir}/OwnershipChecker.jar" basedir="${dest}" includes="**/*.class" excludes="test/**">
+      <manifest>
+        <attribute name="Main-Class" value="OwnershipChecker"/>
+      </manifest>
+    </jar>
+  </target>
+
+  <!-- build a source distribution -->
+  <target name="zip.sources">
+    <delete file="${base.dir}/GradualOwnershipTypes-src.zip"/>
+    <zip destfile="${base.dir}/GradualOwnershipTypes-src.zip">
+      <fileset dir="${base.dir}">
+        <!-- include frontend source file -->
+        <include name="Java1.4Frontend/JavaPrettyPrinter.java"/>
+        <include name="Java1.4Frontend/JavaChecker.java"/>
+        <include name="Java1.4Frontend/**/*.ast"/>
+        <include name="Java1.4Frontend/**/*.jrag"/>
+        <include name="Java1.4Frontend/**/*.jadd"/>
+        <!-- include parser and scanner -->
+        <include name="Java1.4Frontend/beaver/**/*.java"/>
+        <include name="Java1.4Frontend/scanner/*.flex"/>
+        <exclude name="Java1.4Frontend/scanner/JavaScanner.flex"/>
+        <include name="Java1.4Frontend/scanner/Unicode.java"/>
+        <include name="Java1.4Frontend/parser/*.parser"/>
+        <!-- include tools and buildfile used to build the front-end -->
+        <include name="Java1.4Frontend/tools/*.jar"/>
+        <include name="Java1.4Frontend/build.xml"/>
+        <!-- include readme and licences -->
+        <include name="Java1.4Frontend/README"/>
+        <include name="Java1.4Frontend/licences/BSD"/>
+        <include name="Java1.4Frontend/licences/CPL"/>
+        <include name="Java1.4Frontend/licences/GPL"/>
+        <include name="Java1.4Frontend/licences/LICENSE"/>
+
+        <!-- Ownership implementation -->
+        <include name="OwnershipTypes/src/OwnershipChecker.java"/>
+        <include name="OwnershipTypes/JavaChecker.java"/>
+        <include name="OwnershipTypes/**/*.ast"/>
+        <include name="OwnershipTypes/**/*.jrag"/>
+        <include name="OwnershipTypes/**/*.jadd"/>
+        <!-- include parser and scanner -->
+        <include name="OwnershipTypes/src/beaver/**/*.java"/>
+        <include name="OwnershipTypes/src/scanner/*.flex"/>
+        <include name="OwnershipTypes/src/scanner/Unicode.java"/>
+        <include name="OwnershipTypes/src/parser/*.parser"/>
+        <include name="OwnershipTypes/src/helpers/**/*.java"/>
+
+        <!-- Tests -->
+        <include name="OwnershipTypes/test/**/*.java"/>
+        <include name="OwnershipTypes/testdata/**/*.java"/>
+        <include name="OwnershipTypes/testdata/**/*.txt"/>
+
+        <!-- include tools and buildfile used to build the front-end -->
+        <include name="OwnershipTypes/tools/*.jar"/>
+        <include name="build.xml"/>
+
+        <!-- include readme and licences -->
+        <include name="README"/>
+        <include name="OwnershipTypes/licences/BSD"/>
+        <include name="OwnershipTypes/licences/CPL"/>
+        <include name="OwnershipTypes/licences/GPL"/>
+        <include name="OwnershipTypes/licences/LICENSE"/>
+
+
+
+      </fileset>
+    </zip>
+  </target>
+
+  <target name="build.tests" depends="build">
+
+    <mkdir dir="${test.dest}"/>
+
+    <javac srcdir="${test.src}"
+           destdir="${test.dest}"
+           debug="true">
+      <classpath>
+        <path refid="project.classpath"/>
+        <path location="${dest}"/>
+      </classpath>
+      <include name="**/*.java"/>
+    </javac>
+
+  </target>
+
+
+  <target name="run.tests" depends="build.tests">
+
+    <mkdir dir="${project.dir}/logs"/>
+
+    <junit fork="yes"
+           dir="${project.dir}"
+           showoutput="yes"
+           printsummary="yes"
+           haltonfailure="no"
+           haltonerror="no">
+
+      <classpath>
+        <path refid="project.classpath"/>
+        <path location="${dest}"/>
+        <path location="${test.dest}"/>
+      </classpath>
+
+      <formatter type="plain"/>
+
+      <batchtest todir="${project.dir}/logs">
+        <fileset dir="${test.dest}">
+          <include name="**/*Test.class"/>
+        </fileset>
+      </batchtest>
+    </junit>
+  </target>
+
+</project>
+

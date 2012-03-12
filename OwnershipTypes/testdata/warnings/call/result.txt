@@ -1,0 +1,1 @@
+12:-1:WARNING: The type D[;(o1->dep_12_12_D_o1);(o2->world);(this->fixedThis_12_12)] of the expression arg1 does not statically conform to its expected type D[;(o1->Main.this);(o2->world);(this->d1)]

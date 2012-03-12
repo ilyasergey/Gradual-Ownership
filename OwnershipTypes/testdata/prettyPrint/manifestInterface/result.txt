@@ -1,0 +1,8 @@
+interface D/*<, owner>*/ {
+}
+
+class E/*<>*/ implements D/*<owner, >*/ {
+  E() {
+    super();
+  }
+}

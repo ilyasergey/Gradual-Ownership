@@ -1,0 +1,304 @@
+import helpers.*;
+import java.util.ArrayList;
+import java.util.Collection;
+
+aspect OwnersRelations{
+
+  // Same checks for OwnerDeclarations
+  syn boolean ASTNode.isWorld() = false;
+  eq World.isWorld() = true;
+
+  syn boolean ASTNode.isThisOwner() = false;
+  eq ThisOwner.isThisOwner() = true;
+
+  syn boolean ASTNode.isUnknownOwner() = false;
+  eq UnknownOwner.isUnknownOwner() = true;
+
+  syn boolean ASTNode.isDependentOwner() = false;
+  eq DependentOwner.isDependentOwner() = true;
+
+  syn boolean ASTNode.isBadOwner() = false;
+  eq BadOwnerVariable.isBadOwner() = true;
+
+  syn boolean ASTNode.isConcreteOwner() = ! (this instanceof UnknownOwner || this instanceof DependentOwner);
+
+  // Check the `inside' for the owners
+  syn boolean OwnerDeclaration.inside(OwnerDeclaration other) {
+    /* (IN-REFL) */
+    if (this == other) {
+     return true;
+    }
+    /* (IN-WORLD) */
+    if (other.isWorld()) {
+      return true;
+    }
+    /* (IN-TRANS) */
+    // Self-types and mix-inst would be so useful here...
+    return ((ASTNode)this).lookupOwnerInside(this, other);
+  }
+
+  syn boolean OwnerDeclaration.isValidAt(ASTNode place) {
+    if (this.getParent() == null) return true;
+    if (place instanceof Expr && ((Expr)place).inStaticMethod() && !this.isWorld()) {
+      return false;
+    }
+    if (this.isWorld() || this.isUnknownOwner() || this.isDependentOwner()) return true;
+    TypeDecl scope = place.getEnclosingTypeDecl();
+    if (this.getEnclosingTypeDecl() == scope) return true;
+    if (this == scope.owner()) return true;
+    // may be something else...
+    return false;
+  }
+
+
+  // check SUB-relation for owners
+  syn boolean OwnerDeclaration.subcon(OwnerDeclaration other) = (
+       this.isUnknownOwner()
+    || other.isUnknownOwner()
+    || this.isDependentOwner()
+    || other.isDependentOwner()
+    || this.inside(other)
+  );
+
+  // Ownership consistency (`~')
+  syn boolean OwnerDeclaration.consistent(OwnerDeclaration other) = (
+       this.isUnknownOwner ()    /* (CON-LEFT) */
+    || other.isUnknownOwner()    /* (CON-RIGHT) */
+    || this.isDependentOwner()   /* (CON-DEP2) */
+    || other.isDependentOwner()  /* (CON-DEP1) */
+    || this == other            /* (CON-REFL) */
+  );
+
+  // Type consistency
+  /* (CON-TYPE) */
+  syn boolean TypeDecl.consistent(TypeDecl td);
+  eq TypeDecl.consistent(TypeDecl td) = this.original() == td.original();
+  eq OwnershipType.consistent(TypeDecl td) {
+    if (td instanceof OwnershipType) {
+      if (original() != td.original()) {
+        return false;
+      }
+      OwnershipType other = (OwnershipType) td;
+      ArrayList<OwnerDeclaration> selfArgs = this.argsAsList();
+      ArrayList<OwnerDeclaration> otherArgs = other.argsAsList();
+      if (selfArgs.size() != otherArgs.size()) {
+        return false;
+      }
+      for (int i = 0; i < selfArgs.size(); i++) {
+         OwnerDeclaration l = (OwnerDeclaration)selfArgs.get(i);
+         OwnerDeclaration r = (OwnerDeclaration)otherArgs.get(i);
+        if (!l.consistent(r)) {
+          return false;
+        }
+      }
+      return true;
+    }
+    return false;
+  }
+
+}
+
+aspect OwnersAux {
+  // Auxiliary methods for the interface OwnershipType
+  syn lazy ArrayList<OwnerDeclaration> OwnershipType.argsAsList() {
+    final ArrayList<OwnerDeclaration> result = new ArrayList<OwnerDeclaration>();
+    Substitution subst = getSubstitution();
+    for (OwnerDeclaration o : getInner().getOwnerParameterList()) {
+      result.add(subst.apply(o.name()));
+    }
+    return result;
+  }
+
+  syn lazy ArrayList<String> OwnershipType.paramsAsList() {
+    final ArrayList<String> result = new ArrayList<String>();
+    Substitution subst = getSubstitution();
+    for (OwnerDeclaration o : getInner().getOwnerParameterList()) {
+      result.add(o.name());
+    }
+    return result;
+  }
+
+  syn lazy OwnerDeclaration TypeDecl.owner();
+  eq TypeDecl.owner() = world();
+  eq OwnerClassDecl.owner() = isParametrized() && getNumOwnerParameter() > 0 ? getOwnerParameter(0) : manifestOwner();
+  eq OwnerInterfaceDecl.owner() = isParametrized() && getNumOwnerParameter() > 0 ? getOwnerParameter(0) : manifestOwner();
+  eq OwnershipType.owner() {
+    ArrayList<OwnerDeclaration> args = argsAsList();
+    if (args.size() > 0) return args.get(0);
+    Collection<TypeDecl> supers = supers();
+    for (TypeDecl st : supers) {
+      if (st != this) return st.owner();
+    }
+     return world();
+  }
+
+  syn lazy OwnerDeclaration OwnerClassDecl.manifestOwner() {
+    if (isStatic()) return world();
+    if (hasSuperClassAccess()) {
+      TypeDecl type = getSuperClassAccess().type();
+      if (type instanceof OwnershipType) {
+        OwnershipType ot = (OwnershipType) type;
+        return ot.owner();
+      }
+    } else if (getNumImplements() > 0) {
+      TypeDecl type = getImplements(0).type();
+      if (type instanceof OwnershipType) {
+        OwnershipType ot = (OwnershipType) type;
+        final OwnerDeclaration owner = ot.owner();
+        return owner.isUnknownOwner() ? world() : owner;
+
+      }
+    }
+    return world();
+  }
+
+  syn lazy OwnerDeclaration OwnerInterfaceDecl.manifestOwner() {
+    if (isStatic()) return world();
+    if (getNumSuperInterfaceId() > 0) {
+      TypeDecl type = getSuperInterfaceId(0).type();
+      if (type instanceof OwnershipType) {
+        OwnershipType ot = (OwnershipType) type;
+        final OwnerDeclaration owner = ot.owner();
+        return owner.isUnknownOwner() ? world() : owner;
+      }
+    }
+    return world();
+  }
+
+  syn int List.size() = getNumChild();
+  syn ASTNode List.get(int i) = getChild(i);
+
+  //todo Implement a conversion from a raw TypeDecl to OwnershipType
+
+  interface DependentOwnerProvider {
+    // to be filled later
+  }
+  Expr implements DependentOwnerProvider;
+  ParameterDeclaration implements DependentOwnerProvider;
+  FieldDeclaration implements DependentOwnerProvider;
+//  VariableDeclaration implements DependentOwnerProvider;
+
+  syn DependentOwner DependentOwnerProvider.createDependent(String name, TypeDecl inner);
+  eq ParameterDeclaration.createDependent(String name, TypeDecl inner) = new DependentParamOwner(name, inner, this);
+  eq FieldDeclaration.createDependent(String name, TypeDecl inner) = new DependentFieldOwner(name, inner, this);
+  eq Expr.createDependent(String name, TypeDecl inner) = new DependentExprOwner(name, inner, this);
+
+  syn OwnerDeclaration Expr.createForThis() = new FixedThis(this);
+  eq Access.createForThis() {
+    if (!isQualified() && this instanceof VarAccess) {
+      final Variable decl = ((VarAccess) this).decl();
+      // Dynamic ownership on the stack using static variables
+      if (decl.isFinal() &&
+         (decl instanceof Variable)) {
+        return ((OwnerDeclaration) decl);
+      }
+    }
+    return super.createForThis();
+  }
+
+  /*
+  `fill' function imple\mentation
+  */
+  syn TypeDecl Expr.fill(TypeDecl t) {
+    if (t instanceof OwnershipType) {
+      final OwnershipType ot = (OwnershipType) t;
+      final Substitution declared = ot.getSubstitution();
+      Substitution subst = Substitution.empty();
+      for (String param : declared.getDomain()) {
+        if ("this".equals(param)) continue;
+        final OwnerDeclaration pi = declared.apply(param);
+        OwnerDeclaration qi;
+        if (pi.isUnknownOwner()) {
+          qi = createDependent(param, t);
+        } else if (pi.isThisOwner() &&
+                   lookupThisOwner() != pi &&
+                   !getEnclosingTypeDecl().isInnerTypeOf(((ThisOwner) pi).hostType())) {
+          if (declared.isDefined("apply")) {
+            qi = declared.apply("this");
+          } else { // todo think about inner classes and owners...
+            qi = createDependent(param, t) ;
+          }
+        } else {
+          qi = pi;
+        }
+        subst = subst.update(param, qi);
+      }
+      // add `this' mapping
+      subst = subst.update("this", createForThis());
+      return ot.getInner().lookupOwnershipType(subst);
+    }
+    return t;
+  }
+
+  syn TypeDecl ParameterDeclaration.fill(TypeDecl t) {
+    if (t instanceof OwnershipType && isFinal()) {
+      final OwnershipType ot = (OwnershipType) t;
+      final Substitution declared = ot.getSubstitution();
+      Substitution subst = Substitution.empty();
+      for (String param : declared.getDomain()) {
+        final OwnerDeclaration pi = declared.apply(param);
+        OwnerDeclaration qi;
+        if (pi.isUnknownOwner()) {
+          qi = createDependent(param, t);
+        } else {
+          qi = pi;
+        }
+        subst = subst.update(param, qi);
+      }
+      // add `this' mapping
+      subst = subst.update("this", this);
+      return ot.getInner().lookupOwnershipType(subst);
+    }
+    return t;
+  }
+
+  syn TypeDecl FieldDeclaration.fill(TypeDecl t) {
+    if (t instanceof OwnershipType && isFinal()) {
+      final OwnershipType ot = (OwnershipType) t;
+      final Substitution declared = ot.getSubstitution();
+      Substitution subst = Substitution.empty();
+      for (String param : declared.getDomain()) {
+        final OwnerDeclaration pi = declared.apply(param);
+        OwnerDeclaration qi;
+        if (pi.isUnknownOwner()) {
+          qi = createDependent(param, t);
+        } else {
+          qi = pi;
+        }
+        subst = subst.update(param, qi);
+      }
+      // add `this' mapping
+      subst = subst.update("this", this);
+      return ot.getInner().lookupOwnershipType(subst);
+    }
+    return t;
+  }
+
+  // Dual function to `un-fill'
+  syn TypeDecl Expr.unfill(TypeDecl t) {
+    if (t instanceof OwnershipType) {
+      final OwnershipType ot = (OwnershipType) t;
+      final Substitution declared = ot.getSubstitution();
+      Substitution subst = Substitution.empty();
+      for (String param : declared.getDomain()) {
+        if ("this".equals(param)) continue;
+        final OwnerDeclaration pi = declared.apply(param);
+        OwnerDeclaration qi;
+        if (pi.isDependentOwner()) {
+          ASTNode node = ((DependentOwner) pi).getNode();
+          if (this == node) {
+            qi = new UnknownOwner();
+          } else {
+            qi = pi;
+          }
+        } else {
+          qi = pi;
+        }
+        subst = subst.update(param, qi);
+      }
+      return ot.getInner().lookupOwnershipType(subst);
+    }
+    return t;
+  }
+  eq AbstractDot.unfill(TypeDecl t) = lastAccess().unfill(t);
+}

@@ -1,0 +1,1 @@
+12:-1:can not assign boo of type F[;(o1->?);(o2->owner)] a value of type F[;(o1->dep_12_28_F_o1);(o2->world);(this->fixedThis_12_32)]

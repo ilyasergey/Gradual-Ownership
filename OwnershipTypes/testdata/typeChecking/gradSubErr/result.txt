@@ -1,0 +1,1 @@
+12:-1:can not assign b3 of type B[;(q->?);(t->owner)] a value of type D[;(owner->owner)]
